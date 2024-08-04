@@ -21,10 +21,16 @@ bash instsll.sh
 
 ## Usage
 
-Run the main script with desired options:
+Run the main script for list of domains with desired options:
 
 ```bash
 python3 main.py -h
+```
+Run the main script for single domain with desired options:
+
+```bash
+chmod +x main.sh
+./main.sh output example.com
 ```
 
 ## Contributing
