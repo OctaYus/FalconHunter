@@ -30,7 +30,7 @@ Run the main script for single domain with desired options:
 
 ```bash
 chmod +x main.sh
-./main.sh output example.com
+./signleDomain.sh output example.com
 ```
 
 ## Contributing
