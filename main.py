@@ -205,6 +205,10 @@ def sqli(output):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2 :
+        print(f"{RED}[+] Usage: %s <hosts-file> <output-directory>{END}" % sys.argv[0])
+        print(f"{RED}[+] Example: %s example.com example-output {END}" % sys.argv[0])
+        sys.exit(1)
     hosts = sys.argv[1]
     output = sys.argv[2]
     mk_dir(output)
