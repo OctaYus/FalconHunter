@@ -5,10 +5,8 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Update package lists
+# Update package lists and install dependencies
 sudo apt update
-
-# Install dependencies
 sudo apt install -y curl wget git python3 python3-pip
 
 # Install Go
@@ -16,6 +14,7 @@ if ! command_exists go; then
     echo "Installing Go..."
     wget https://golang.org/dl/go1.20.1.linux-amd64.tar.gz
     sudo tar -C /usr/local -xzf go1.20.1.linux-amd64.tar.gz
+    rm go1.20.1.linux-amd64.tar.gz
     export PATH=$PATH:/usr/local/go/bin
     echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
     source ~/.bashrc
@@ -29,91 +28,104 @@ echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
 echo 'export GOPATH=$HOME/go' >> ~/.bashrc
 source ~/.bashrc
 
-# Install subfinder
-if ! command_exists subfinder; then
-    echo "Installing subfinder..."
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-fi
+# Install tools
+tools=(
+    "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+    "github.com/owasp-amass/amass/v3/...@master"
+    "github.com/projectdiscovery/httpx/cmd/httpx@latest"
+    "github.com/tomnomnom/waybackurls@latest"
+    "github.com/lc/gau@latest"
+    "github.com/tomnomnom/gf@latest"
+    "github.com/tomnomnom/qsreplace@latest"
+    "github.com/m1ndo/freq@latest"
+    "github.com/anarchysteam/mantra@latest"
+    "github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest"
+    "github.com/PentestPad/subzy@latest"
+    "github.com/haccer/subjack@latest"
+)
 
-# Install amass
-if ! command_exists amass; then
-    echo "Installing amass..."
-    go install -v github.com/owasp-amass/amass/v3/...@master
-fi
+for tool in "${tools[@]}"; do
+    tool_name=$(basename "$tool" | cut -d@ -f1)
+    if ! command_exists "$tool_name"; then
+        echo "Installing $tool_name..."
+        go install -v "$tool"
+    fi
+done
 
-# Install httpx
-if ! command_exists httpx; then
-    echo "Installing httpx..."
-    go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-fi
+# Install Python-based tools
+python_tools=(
+    "waymore"
+    "trufflehog"
+)
 
-# Install subzy
-if ! command_exists subzy; then
-    echo "Installing subzy..."
-    go install -v github.com/LukaSikic/subzy@latest
-fi
+for py_tool in "${python_tools[@]}"; do
+    if ! command_exists "$py_tool"; then
+        echo "Installing $py_tool..."
+        pip3 install "$py_tool"
+    fi
+done
 
-# Install waymore
-if ! command_exists waymore; then
-    echo "Installing waymore..."
-    pip3 install waymore
-fi
-
-# Install waybackurls
-if ! command_exists waybackurls; then
-    echo "Installing waybackurls..."
-    go install -v github.com/tomnomnom/waybackurls@latest
-fi
-
-# Install gau
-if ! command_exists gau; then
-    echo "Installing gau..."
-    go install -v github.com/lc/gau@latest
-fi
-
-# Install paramspider
+# Install ParamSpider
 if ! command_exists paramspider; then
-    echo "Installing paramspider..."
+    echo "Installing ParamSpider..."
     git clone https://github.com/devanshbatham/ParamSpider
     cd ParamSpider || exit
     pip3 install -r requirements.txt
     sudo ln -s "$(pwd)/paramspider.py" /usr/local/bin/paramspider
     cd ..
+    rm -rf ParamSpider
 fi
 
-# Install gf
-if ! command_exists gf; then
-    echo "Installing gf..."
-    go install -v github.com/tomnomnom/gf@latest
-    echo 'source $(which gf-completion.sh)' >> ~/.bashrc
-    source ~/.bashrc
+# Install Dalfox
+if ! command_exists dalfox; then
+    echo "Installing Dalfox..."
+    go install -v github.com/hahwul/dalfox/v2@latest
 fi
 
-# Install qsreplace
-if ! command_exists qsreplace; then
-    echo "Installing qsreplace..."
-    go install -v github.com/tomnomnom/qsreplace@latest
+# Install XSShunter
+if ! command_exists xsser; then
+    echo "Installing XSShunter..."
+    sudo apt install xsser
 fi
 
-# Install freq
-if ! command_exists freq; then
-    echo "Installing freq..."
-    go install -v github.com/m1ndo/freq@latest
+# Install SSTImap
+if ! command_exists sstimap; then
+    echo "Installing SSTImap..."
+    pip3 install sstimap
 fi
 
-# Install mantra
-if ! command_exists mantra; then
-    echo "Installing mantra..."
-    go install -v github.com/anarchysteam/mantra@latest
+# Install Ghauri
+if ! command_exists ghauri; then
+    echo "Installing Ghauri..."
+    go install -v github.com/r0oth3x49/ghauri@latest
 fi
 
-# Install nuclei
-if ! command_exists nuclei; then
-    echo "Installing nuclei..."
-    go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+# Install OpenRedireX
+if ! command_exists openredirex; then
+    echo "Installing OpenRedireX..."
+    git clone https://github.com/devanshbatham/OpenRedireX
+    cd OpenRedireX || exit
+    pip3 install -r requirements.txt
+    sudo ln -s "$(pwd)/openredirex.py" /usr/local/bin/openredirex
+    cd ..
+    rm -rf OpenRedireX
 fi
 
-# Clean up
-rm go1.20.1.linux-amd64.tar.gz
+# Install SecretFinder
+if ! command_exists SecretFinder; then
+    echo "Installing SecretFinder..."
+    git clone https://github.com/m4ll0k/SecretFinder
+    cd SecretFinder || exit
+    pip3 install -r requirements.txt
+    sudo ln -s "$(pwd)/SecretFinder.py" /usr/local/bin/SecretFinder
+    cd ..
+    rm -rf SecretFinder
+fi
+
+# Install Gitleaks
+if ! command_exists gitleaks; then
+    echo "Installing Gitleaks..."
+    sudo apt install -y gitleaks
+fi
 
 echo "All tools installed successfully!"
