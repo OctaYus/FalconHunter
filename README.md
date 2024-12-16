@@ -21,17 +21,16 @@ bash instsll.sh
 
 ## Usage
 
-Run the main script for list of domains with desired options:
+- Run the main script for list of domains with desired options:
 
 ```bash
-python3 main.py -h
+python3 main.py -d/--domains, -templates/--nuclei-templates, -sstimap/--sstimap-path, -o/--output
 ```
-Run the main script for single domain with desired options:
-
+- For help: 
 ```bash
-chmod +x main.sh
-./signleDomain.sh output example.com
+python3 main.py -h 
 ```
+
 
 ## Contributing
 
