@@ -882,8 +882,8 @@ def main():
     pwd = os.getcwd()
     real_time = date.now()
     formatted_time = real_time.strftime("%Y-%m-%d %H:%M:%S")
-    telegram_token = "REDACTED"
-    telegram_chat_id = "REDACTED_CHAT_ID"
+    telegram_token = ""
+    telegram_chat_id = ""
 
     # Create an instance of TelegramNotify
     notifier = TelegramNotify(telegram_token, telegram_chat_id)
