@@ -834,7 +834,7 @@ class Nuclei:
             print(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
 
-class TelegramNotify():
+class TelegramNotify:
     def __init__(self, telegram_token, telegram_chat_id):
         self.token = telegram_token
         self.chat_id = telegram_chat_id
