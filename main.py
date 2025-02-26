@@ -27,11 +27,11 @@ color = Colors()
 # Banner for the script, displayed at the start
 
 banner = rf"""{color.GREEN}
-    ______      __                      __  __            __           
+    ______      __                      __  __            __
    / ____/___ _/ /________  ____  ___  / / / /_  ______  / /____  _____
   / /_  / __ `/ / ___/ __ \/ __ \/ _ \/ /_/ / / / / __ \/ __/ _ \/ ___/
- / __/ / /_/ / / /__/ /_/ / / / /  __/ __  / /_/ / / / / /_/  __/ /    
-/_/    \__,_/_/\___/\____/_/ /_/\___/_/ /_/\__,_/_/ /_/\__/\___/_/  
+ / __/ / /_/ / / /__/ /_/ / / / /  __/ __  / /_/ / / / / /_/  __/ /
+/_/    \__,_/_/\___/\____/_/ /_/\___/_/ /_/\__,_/_/ /_/\__/\___/_/
                                                             Coder: OctaYus0x01
                                                             https://github.com/octayus
                                                                                             {color.END}
@@ -834,7 +834,7 @@ class Nuclei:
             print(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
 
-class TelegramNotify:
+class TelegramNotify():
     def __init__(self, telegram_token, telegram_chat_id):
         self.token = telegram_token
         self.chat_id = telegram_chat_id
@@ -858,12 +858,13 @@ class TelegramNotify:
 
 def done():
     print(rf"""{color.GREEN}
-  ________            _____                     _         ____                        ______                __   __               __      __   _____    
- /_  __/ /_  ___     / ___/_________ _____     (_)____   / __ \____  ____  ___       / ____/___  ____  ____/ /  / /   __  _______/ /__   / /  |__  /    
-  / / / __ \/ _ \    \__ \/ ___/ __ `/ __ \   / / ___/  / / / / __ \/ __ \/ _ \     / / __/ __ \/ __ \/ __  /  / /   / / / / ___/ //_/  / /    /_ <     
- / / / / / /  __/   ___/ / /__/ /_/ / / / /  / (__  )  / /_/ / /_/ / / / /  __/    / /_/ / /_/ / /_/ / /_/ /  / /___/ /_/ / /__/ ,<     \ \  ___/ /     
-/_/ /_/ /_/\___/   /____/\___/\__,_/_/ /_/  /_/____/  /_____/\____/_/ /_/\___(_)   \____/\____/\____/\__,_/  /_____/\__,_/\___/_/|_|     \_\/____/      
-   {color.END}                                                                                                                                                     
+  ________            _____                     _         ____                        ______                __   __               __      __   _____
+ /_  __/ /_  ___     / ___/_________ _____     (_)____   / __ \____  ____  ___       / ____/___  ____  ____/ /  / /   __  _______/ /__   / /  |__  /
+  / / / __ \/ _ \    \__ \/ ___/ __ `/ __ \   / / ___/  / / / / __ \/ __ \/ _ \     / / __/ __ \/ __ \/ __  /  / /   / / / / ___/ //_/  / /    /_ <
+ / / / / / /  __/   ___/ / /__/ /_/ / / / /  / (__  )  / /_/ / /_/ / / / /  __/    / /_/ / /_/ / /_/ / /_/ /  / /___/ /_/ / /__/ ,<     \ \  ___/ /
+/_/ /_/ /_/\___/   /____/\___/\__,_/_/ /_/  /_/____/  /_____/\____/_/ /_/\___(_)   \____/\____/\____/\__,_/  /_____/\__,_/\___/_/|_|     \_\/____/
+   {color.END}
+
 """)
 
 
@@ -951,12 +952,12 @@ def main():
     lfi.lfi_map()
     notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) LFI test completed")
 
-    # # Execute SSTI and notify
+    # Execute SSTI and notify
     ssti = SSTI(domains, output_file, sstimap_path)
     ssti.ssti_cli()
     notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) SSTI test completed")
-    #
-    # # Execute SSRF and notify
+
+    # Execute SSRF and notify
     ssrf = SSRF(domains, output_file)
     ssrf.ssrf_cli()
     notifier.notify_telegram(telegram_token, telegram_chat_id, "(+) SSRF test completed")
