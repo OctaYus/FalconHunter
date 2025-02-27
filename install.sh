@@ -61,7 +61,7 @@ python_tools=(
 for py_tool in "${python_tools[@]}"; do
     if ! command_exists "$py_tool"; then
         echo "Installing $py_tool..."
-        pip3 install "$py_tool"
+        pip3 install "$py_tool" --break-system-packages
     fi
 done
 
@@ -70,7 +70,7 @@ if ! command_exists paramspider; then
     echo "Installing ParamSpider..."
     git clone https://github.com/devanshbatham/ParamSpider
     cd ParamSpider || exit
-    pip3 install -r requirements.txt
+    pip3 install -r requirements.txt 
     sudo ln -s "$(pwd)/paramspider.py" /usr/local/bin/paramspider
     cd ..
     rm -rf ParamSpider
