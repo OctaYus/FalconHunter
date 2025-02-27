@@ -70,7 +70,7 @@ if ! command_exists paramspider; then
     echo "Installing ParamSpider..."
     git clone https://github.com/devanshbatham/ParamSpider
     cd ParamSpider || exit
-    pip3 install -r requirements.txt 
+    pip3 install -r requirements.txt --break-system-packages
     sudo ln -s "$(pwd)/paramspider.py" /usr/local/bin/paramspider
     cd ..
     rm -rf ParamSpider
@@ -91,7 +91,7 @@ fi
 # Install SSTImap
 if ! command_exists sstimap; then
     echo "Installing SSTImap..."
-    pip3 install sstimap
+    pip3 install sstimap --break-system-packages
 fi
 
 # Install Ghauri
@@ -105,7 +105,7 @@ if ! command_exists openredirex; then
     echo "Installing OpenRedireX..."
     git clone https://github.com/devanshbatham/OpenRedireX
     cd OpenRedireX || exit
-    pip3 install -r requirements.txt
+    pip3 install -r requirements.txt --break-system-packages
     sudo ln -s "$(pwd)/openredirex.py" /usr/local/bin/openredirex
     cd ..
     rm -rf OpenRedireX
@@ -116,7 +116,7 @@ if ! command_exists SecretFinder; then
     echo "Installing SecretFinder..."
     git clone https://github.com/m4ll0k/SecretFinder
     cd SecretFinder || exit
-    pip3 install -r requirements.txt
+    pip3 install -r requirements.txt --break-system-packages
     sudo ln -s "$(pwd)/SecretFinder.py" /usr/local/bin/SecretFinder
     cd ..
     rm -rf SecretFinder
