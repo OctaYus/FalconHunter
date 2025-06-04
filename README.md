@@ -24,7 +24,7 @@ bash instsll.sh
 - Run the main script for list of domains with desired options:
 
 ```bash
-python3 main.py -d/--domains, -templates/--nuclei-templates, -sstimap/--sstimap-path, -o/--output
+python3 main.py -d/--domains, -o/--output
 ```
 - For help: 
 ```bash
