@@ -1,43 +1,59 @@
-# FalconHunter
+# FalconHunter - Active Recon & Vulnerability Scanner  
 
-FalconHunter is an active reconnaissance and vulnerability scanner framework designed to assist security professionals in identifying and assessing potential security risks.
+**FalconHunter** is a hands-on security tool built for pentesters and security researchers. It helps you dig into targets, find weaknesses, and get the data you need—fast.  
 
-## Features
+## Why Use This?
 
-- **Active Reconnaissance**: Gather information about target systems.
-- **Vulnerability Scanning**: Detect common vulnerabilities.
-- **Modular Design**: Easy to use
+* **Tool Integration**: Leverages a wide array of tools like `httpx`, `nuclei`, `dnsx`, `subfinder`, and `cname finder` to automate the reconnaissance process.
+* **Logging Support**: Includes a logging system to track scan progress and results, making debugging and auditing easier.
+* **Telegram Bot Alerts**: Optionally integrates with Telegram to send real-time updates or final scan results directly to your chat.
+* **Modular & Customisable**: Easily tweak which tools or modules to run, based on your recon scope or target type. 
 
-## Installation
+## Get It Running  
 
-Clone the repository and install dependencies:
+1. **Grab the code**:  
+   ```bash
+   git clone https://github.com/OctaYus/FalconHunter.git
+   cd FalconHunter
+   ```  
+
+2. **Install dependencies (just run this)**:  
+   ```bash
+   pip install -r requirements.txt
+   bash install.sh
+   ```  
+
+## How to Use It  
+
+Basic scan:  
+```bash
+python3 main.py -d example.com -o results.txt
+```  
+Need help? Run:  
 
 ```bash
-git clone https://github.com/OctaYus/FalconHunter.git
-cd FalconHunter
-pip install -r requirements.txt
-bash instsll.sh
-```
+python3 main.py -h
 
-## Usage
+options:
+  -h, --help            show this help message and exit
+  -d DOMAINS, --domains DOMAINS
+                        Path to file containing list of domains
+  -o OUTPUT, --output OUTPUT
+                        Output directory name
+```  
 
-- Run the main script for list of domains with desired options:
+## Contribute  
 
-```bash
-python3 main.py -d/--domains, -o/--output
-```
-- For help: 
-```bash
-python3 main.py -h 
-```
+Found a bug? Got a killer feature idea?  
+- Open an **issue**  
+- Send a **pull request**  
+- No BS—just practical improvements  
 
+## License  
 
-## Contributing
+**MIT License** - Do what you want, just don't blame us.  
 
-Feel free to submit issues or pull requests.
+**GitHub**: [https://github.com/OctaYus/FalconHunter](https://github.com/OctaYus/FalconHunter)  
 
-## License
-
-This project is licensed under the MIT License.
-
-For more details, visit the [GitHub repository](https://github.com/OctaYus/FalconHunter).
+---  
+*Built for those who break things to make them secure.*
