@@ -27,7 +27,7 @@
 
 Basic scan:  
 ```bash
-python3 main.py -d example.com -o results.txt
+python3 main.py -d example_list.txt -o results.txt
 ```  
 Need help? Run:  
 
