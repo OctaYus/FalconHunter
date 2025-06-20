@@ -1,11 +1,5 @@
-os
-subprocess
-sys
-time
 requests
-re
-argparse
-json
-dns.resolver
-tqdm 
 boto3
+botocore
+tqdm
+dnspython
