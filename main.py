@@ -393,28 +393,6 @@ class SubdomainTakeOver:
             )
 
 
-import json
-import requests
-import boto3
-from botocore.exceptions import ClientError
-import logging
-
-logger = logging.getLogger("Falcon")
-
-
-class Colors:
-    """Class to define ANSI color codes for terminal output"""
-    def __init__(self):
-        self.GREEN = "\033[32m"
-        self.RED = "\033[31m"
-        self.BLUE = "\033[34m"
-        self.SKY_BLUE = "\033[38;5;153m"
-        self.END = "\033[0m"
-
-
-color = Colors()
-
-
 class BucketFinder:
     """Class to find and test S3 buckets for misconfigurations"""
 
