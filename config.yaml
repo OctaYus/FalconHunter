@@ -1,0 +1,7 @@
+telegram:
+  token: "your_bot_token"
+  chat_id: "your_chat_id"
+
+cleanup:
+  remove_empty_files: true
+  remove_empty_dirs: true
