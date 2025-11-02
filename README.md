@@ -23,7 +23,21 @@
    bash install.sh
    ```  
 
-## How to Use It  
+## How to Use It 
+
+Add your telegram bot API token to `config.yaml`:
+
+```yaml
+telegram:
+  token: "your_bot_token"
+  chat_id: "your_chat_id"
+
+cleanup:
+  remove_empty_files: true
+  remove_empty_dirs: true
+
+```
+
 
 Basic scan:  
 ```bash
