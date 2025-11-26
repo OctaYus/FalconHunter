@@ -66,8 +66,3 @@ Found a bug? Got a killer feature idea?
 ## License  
 
 **MIT License** - Do what you want, just don't blame us.  
-
-**GitHub**: [https://github.com/OctaYus/FalconHunter](https://github.com/OctaYus/FalconHunter)  
-
----  
-*Built for those who break things to make them secure.*
