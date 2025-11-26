@@ -1,193 +1,196 @@
 #!/bin/bash
 
-# Colors for output
+
+set -e
+
+CONFIG_FILE="./falconhunter.cfg"
+if [[ -f $CONFIG_FILE ]]; then
+    source "$CONFIG_FILE"
+fi
+
+# Location for external tools and data
+tools="${tools:-$HOME/Tools}"
+
+# Ensure script runs with bash >= 4
+BASH_VERSION_NUM=$(bash --version | awk 'NR==1{print $4}' | cut -d'.' -f1)
+if [[ $BASH_VERSION_NUM -lt 4 ]]; then
+    echo "Your Bash version is lower than 4. Please update."
+    exit 1
+fi
+
+# Colors
+NC='\033[0m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
 
-# Function to check if a command exists
+
+
+declare -A go_tools=(
+  [subfinder]="github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+  [amass]="github.com/owasp-amass/amass/v3/...@master"
+  [httpx]="github.com/projectdiscovery/httpx/cmd/httpx@latest"
+  [waybackurls]="github.com/tomnomnom/waybackurls@latest"
+  [gau]="github.com/lc/gau@latest"
+  [gf]="github.com/tomnomnom/gf@latest"
+  [qsreplace]="github.com/tomnomnom/qsreplace@latest"
+  [freq]="github.com/m1ndo/freq@latest"
+  [mantra]="github.com/anarchysteam/mantra@latest"
+  [nuclei]="github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest"
+  [subzy]="github.com/PentestPad/subzy@latest"
+  [subjack]="github.com/haccer/subjack@latest"
+  [dalfox]="github.com/hahwul/dalfox/v2@latest"
+  [ghauri]="github.com/r0oth3x49/ghauri@latest"
+)
+
+declare -A pip_tools=(
+  [waymore]="waymore"
+  [trufflehog]="trufflehog"
+  [sstimap]="sstimap"
+)
+
+# For Python tools installed via git
+declare -A git_py_tools=(
+  [paramspider]="https://github.com/devanshbatham/ParamSpider"
+  [openredirex]="https://github.com/devanshbatham/OpenRedireX"
+  [secretfinder]="https://github.com/m4ll0k/SecretFinder.git"
+)
+
+# Packages via apt
+apt_tools=(xsser)
+# Extra: Gitleaks via build-from-source
+git_repos=(gitleaks)
+
+
+
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to make a Python script executable system-wide
-make_py_executable() {
-    local tool_name="$1"
-    local script_path="$2"
-    
-    # Add shebang if not present
-    if ! head -1 "$script_path" | grep -q "^#\!/usr/bin/env python3"; then
-        sed -i '1i#!/usr/bin/env python3' "$script_path"
-    fi
-    
-    # Make executable
-    chmod +x "$script_path"
-    
-    # Create symlink without .py extension
-    sudo ln -sf "$script_path" "/usr/local/bin/$tool_name"
+
+
+install_system_packages() {
+    echo -e "${YELLOW}[+] Installing system dependencies...${NC}"
+    sudo apt update
+    sudo apt install -y curl wget git python3 python3-pip python3-venv python3-virtualenv pipx make build-essential gcc cmake ruby whois zip libpcap-dev python3-dev libssl-dev libffi-dev
+    echo -e "${GREEN}[+] System dependencies installed${NC}"
 }
 
-# Function to install a Go tool
-install_go_tool() {
-    local tool_url="$1"
-    local tool_name=$(basename "$tool_url" | cut -d@ -f1)
-    
-    if ! command_exists "$tool_name"; then
-        echo -e "${YELLOW}[+] Installing $tool_name...${NC}"
-        if ! go install -v "$tool_url" 2>&1; then
-            echo -e "${RED}[-] Failed to install $tool_name${NC}"
-            return 1
-        fi
-        echo -e "${GREEN}[+] Successfully installed $tool_name${NC}"
-    else
-        echo -e "${GREEN}[+] $tool_name is already installed${NC}"
-    fi
-}
 
-# Function to install a Python tool
-install_pip_tool() {
-    local tool_name="$1"
-    local package_name="${2:-$tool_name}"
-    
-    if ! command_exists "$tool_name"; then
-        echo -e "${YELLOW}[+] Installing $tool_name...${NC}"
-        if ! pip3 install "$package_name" --break-system-packages 2>&1; then
-            echo -e "${RED}[-] Failed to install $tool_name${NC}"
-            return 1
-        fi
-        echo -e "${GREEN}[+] Successfully installed $tool_name${NC}"
-    else
-        echo -e "${GREEN}[+] $tool_name is already installed${NC}"
-    fi
-}
 
-# Function to install a git repo Python tool
-install_git_py_tool() {
-    local tool_name="$1"
-    local repo_url="$2"
-    local script_path="$3"
-    
-    if ! command_exists "$tool_name"; then
-        echo -e "${YELLOW}[+] Installing $tool_name...${NC}"
-        if ! git clone "$repo_url" "$tool_name-temp" 2>&1 || 
-           ! cd "$tool_name-temp" 2>&1 || 
-           ! pip3 install -r requirements.txt --break-system-packages 2>&1; then
-            echo -e "${RED}[-] Failed to install $tool_name dependencies${NC}"
-            cd .. && rm -rf "$tool_name-temp"
-            return 1
-        fi
-        
-        # Make the Python script executable
-        make_py_executable "$tool_name" "$script_path"
-        
-        cd .. && rm -rf "$tool_name-temp"
-        echo -e "${GREEN}[+] Successfully installed $tool_name${NC}"
-    else
-        echo -e "${GREEN}[+] $tool_name is already installed${NC}"
+install_golang_version() {
+    if command_exists go; then
+        echo -e "${GREEN}[+] Go is already installed${NC}"
+        return
     fi
-}
-
-# Function to install Gitleaks from source
-install_gitleaks() {
-    if ! command_exists gitleaks; then
-        echo -e "${YELLOW}[+] Installing Gitleaks from source...${NC}"
-        if ! git clone https://github.com/gitleaks/gitleaks.git gitleaks-temp 2>&1 || 
-           ! cd gitleaks-temp 2>&1 || 
-           ! make build 2>&1 || 
-           ! sudo cp ./gitleaks /usr/local/bin/ 2>&1 || 
-           ! cd .. 2>&1 || 
-           ! rm -rf gitleaks-temp 2>&1; then
-            echo -e "${RED}[-] Failed to install Gitleaks${NC}"
-            return 1
-        fi
-        echo -e "${GREEN}[+] Successfully installed Gitleaks${NC}"
-    else
-        echo -e "${GREEN}[+] Gitleaks is already installed${NC}"
-    fi
-}
-
-# Update package lists and install dependencies
-echo -e "${YELLOW}[+] Updating packages and installing dependencies...${NC}"
-sudo apt update && sudo apt install -y curl wget git python3 python3-pip make 2>&1 || {
-    echo -e "${RED}[-] Failed to install dependencies${NC}"
-    exit 1
-}
-
-# Install Go if not installed
-if ! command_exists go; then
-    echo -e "${YELLOW}[+] Installing Go...${NC}"
-    if ! wget https://golang.org/dl/go1.20.1.linux-amd64.tar.gz 2>&1 || 
-       ! sudo tar -C /usr/local -xzf go1.20.1.linux-amd64.tar.gz 2>&1 || 
-       ! rm go1.20.1.linux-amd64.tar.gz 2>&1; then
-        echo -e "${RED}[-] Failed to install Go${NC}"
-        exit 1
-    fi
+    local version="go1.20.1"
+    echo -e "${YELLOW}[+] Installing Go $version...${NC}"
+    wget "https://golang.org/dl/${version}.linux-amd64.tar.gz"
+    sudo tar -C /usr/local -xzf "${version}.linux-amd64.tar.gz"
+    rm "${version}.linux-amd64.tar.gz"
     export PATH=$PATH:/usr/local/go/bin
     echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-    source ~/.bashrc
-    echo -e "${GREEN}[+] Successfully installed Go${NC}"
-else
-    echo -e "${GREEN}[+] Go is already installed${NC}"
-fi
+    echo -e "${GREEN}[+] Go installed.${NC}"
+}
 
-# Setup GOPATH
-GOPATH=$HOME/go
-export PATH=$PATH:$GOPATH/bin
-mkdir -p "$GOPATH"/{bin,src,pkg}
-echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
-echo 'export GOPATH=$HOME/go' >> ~/.bashrc
-source ~/.bashrc
+export_paths_and_gopath() {
+    export GOPATH="$HOME/go"
+    export PATH=$PATH:$GOPATH/bin
+    mkdir -p "$GOPATH"/{bin,src,pkg}
+    echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
+    echo 'export GOPATH=$HOME/go' >> ~/.bashrc
+}
 
-# List of Go tools to install
-go_tools=(
-    "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
-    "github.com/owasp-amass/amass/v3/...@master"
-    "github.com/projectdiscovery/httpx/cmd/httpx@latest"
-    "github.com/tomnomnom/waybackurls@latest"
-    "github.com/lc/gau@latest"
-    "github.com/tomnomnom/gf@latest"
-    "github.com/tomnomnom/qsreplace@latest"
-    "github.com/m1ndo/freq@latest"
-    "github.com/anarchysteam/mantra@latest"
-    "github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest"
-    "github.com/PentestPad/subzy@latest"
-    "github.com/haccer/subjack@latest"
-    "github.com/hahwul/dalfox/v2@latest"
-    "github.com/r0oth3x49/ghauri@latest"
-    "go install github.com/takshal/freq@latest"
-)
 
-# Install Go tools
-for tool in "${go_tools[@]}"; do
-    install_go_tool "$tool"
-done
 
-# List of Python tools to install via pip
-pip_tools=(
-    "waymore"
-    "trufflehog"
-    "sstimap"
-)
+install_go_tools() {
+    echo -e "${YELLOW}[+] Installing Go tools...${NC}"
+    for tool in "${!go_tools[@]}"; do
+        if command_exists "$tool"; then
+            echo -e "${GREEN}[+] $tool is already installed${NC}"
+            continue
+        fi
+        echo -e "${YELLOW}[+] Installing $tool...${NC}"
+        go install -v "${go_tools[$tool]}" 2>&1 || echo -e "${RED}[-] Failed to install $tool${NC}"
+    done
+}
 
-# Install Python tools via pip
-for tool in "${pip_tools[@]}"; do
-    install_pip_tool "$tool"
-done
+install_pip_tools() {
+    echo -e "${YELLOW}[+] Installing Python tools...${NC}"
+    for tool in "${!pip_tools[@]}"; do
+        if command_exists "$tool"; then
+            echo -e "${GREEN}[+] $tool is already installed${NC}"
+            continue
+        fi
+        echo -e "${YELLOW}[+] Installing $tool (pip)...${NC}"
+        python3 -m pip install --break-system-packages -U "${pip_tools[$tool]}" 2>&1 || echo -e "${RED}[-] Failed to install $tool${NC}"
+    done
+}
 
-# Install apt tools
-if ! command_exists xsser; then
-    echo -e "${YELLOW}[+] Installing XSShunter...${NC}"
-    sudo apt install -y xsser 2>&1 || echo -e "${RED}[-] Failed to install xsser${NC}"
-fi
+install_apt_tools() {
+    echo -e "${YELLOW}[+] Installing APT tools...${NC}"
+    for t in "${apt_tools[@]}"; do
+        if command_exists "$t"; then
+            echo -e "${GREEN}[+] $t is already installed${NC}"
+            continue
+        fi
+        sudo apt install -y "$t" 2>&1 || echo -e "${RED}[-] Failed to install $t${NC}"
+    done
+}
 
-# Install git-based Python tools
-install_git_py_tool "paramspider" "https://github.com/devanshbatham/ParamSpider" "paramspider.py"
-install_git_py_tool "openredirex" "https://github.com/devanshbatham/OpenRedireX" "openredirex.py"
-install_git_py_tool "secretfinder" "https://github.com/m4ll0k/SecretFinder.git" "SecretFinder.py"
+install_git_py_tools() {
+    mkdir -p "$tools"
+    pushd "$tools"
+    for repo in "${!git_py_tools[@]}"; do
+        if command_exists "$repo"; then
+            echo -e "${GREEN}[+] $repo is already installed${NC}"
+            continue
+        fi
+        rm -rf "$repo"
+        git clone --depth 1 "${git_py_tools[$repo]}" "$repo"
+        cd "$repo"
+        if [[ -f requirements.txt ]]; then
+            python3 -m pip install --break-system-packages -r requirements.txt
+        fi
+        # Assume main script matches repo name for most cases:
+        for script in ./*.py; do
+            script_name=$(basename "$script" .py)
+            chmod +x "$script"
+            sudo ln -sf "$PWD/$(basename "$script")" "/usr/local/bin/$script_name"
+        done
+        cd ..
+    done
+    popd
+}
 
-# Install Gitleaks from source
+install_gitleaks() {
+    if command_exists gitleaks; then
+        echo -e "${GREEN}[+] gitleaks is already installed${NC}"
+        return
+    fi
+    git clone https://github.com/gitleaks/gitleaks.git "$tools/gitleaks"
+    cd "$tools/gitleaks"
+    make build
+    sudo cp ./gitleaks /usr/local/bin/
+    cd ..
+}
+
+final_message() {
+    echo -e "${GREEN}[+] All FalconHunter tools installed successfully!${NC}"
+    echo -e "${YELLOW}[+] You may need to run 'source ~/.bashrc' or restart your terminal for changes to take effect.${NC}"
+}
+
+
+install_system_packages
+install_golang_version
+export_paths_and_gopath
+
+install_go_tools
+install_pip_tools
+install_apt_tools
+install_git_py_tools
 install_gitleaks
 
-echo -e "${GREEN}[+] All tools installed successfully!${NC}"
-echo -e "${YELLOW}[+] You may need to run 'source ~/.bashrc' or restart your terminal for changes to take effect.${NC}"
+final_message
+
+exit 0
