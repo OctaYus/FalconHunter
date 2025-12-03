@@ -963,7 +963,6 @@ def main():
 
     try:
         # The scan is done, notify
-        finder.download_and_scan_js()
 
         # Run cleanup if configured
         if config.get("cleanup", {}).get("enabled", True):
