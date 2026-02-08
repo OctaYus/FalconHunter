@@ -175,7 +175,28 @@ install_xsser() {
     fi
 }
 
-# 7. Gitleaks (Go program with make)
+# 7. BadAuth0 – Auth0 unauthenticated account creation testing (Python)
+install_badauth() {
+    echo -e "${YELLOW}[+] Installing badauth (BadAuth0)...${NC}"
+    if command -v badauth &>/dev/null || [[ -f /usr/local/bin/badauth ]]; then
+        echo -e "${GREEN}[+] badauth is already installed${NC}"
+        return
+    fi
+    rm -rf "$TOOLS_DIR/BadAuth0"
+    git clone --depth 1 https://github.com/OctaYus/BadAuth0.git "$TOOLS_DIR/BadAuth0"
+    pushd "$TOOLS_DIR/BadAuth0" >/dev/null
+    if python3 -m pip --help 2>&1 | grep -q break-system-packages; then
+        python3 -m pip install --break-system-packages --upgrade -r requirements.txt 2>&1 || true
+    else
+        python3 -m pip install --user --upgrade -r requirements.txt 2>&1 || true
+    fi
+    printf '%s\n' '#!/bin/bash' "exec python3 '$TOOLS_DIR/BadAuth0/main.py' \"\$@\"" | sudo tee /usr/local/bin/badauth >/dev/null
+    sudo chmod +x /usr/local/bin/badauth
+    popd >/dev/null
+    echo -e "${GREEN}[+] badauth → /usr/local/bin (BadAuth0)${NC}"
+}
+
+# 8. Gitleaks (Go program with make)
 install_gitleaks() {
     if command -v gitleaks &>/dev/null || [[ -f "/usr/local/bin/gitleaks" ]]; then
         echo -e "${GREEN}[+] gitleaks is already installed${NC}"
@@ -192,6 +213,7 @@ install_go_tools
 install_pipx_tools
 install_git_py_tools
 install_xsser
+install_badauth
 install_gitleaks
 
 echo -e "${GREEN}[+] All FalconHunter tools installed successfully!${NC}"
