@@ -9,8 +9,6 @@ import logging_config
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import boto3
-from botocore.exceptions import ClientError
 from tqdm import tqdm
 import dns.resolver
 import yaml
@@ -62,9 +60,9 @@ def loading_animation(task):
     def decorator(func):
         def wrapper(*args, **kwargs):
             with tqdm(
-                total=100,
-                desc=task,
-                bar_format="{l_bar}{bar} | {n_fmt}/{total_fmt} [{elapsed}]",
+                    total=100,
+                    desc=task,
+                    bar_format="{l_bar}{bar} | {n_fmt}/{total_fmt} [{elapsed}]",
             ) as pbar:
                 for _ in range(100):
                     time.sleep(0.02)  # Simulating task progress
@@ -141,7 +139,6 @@ class MakeDirectories:
                 "gf-xss.txt",
                 "gf-ssrf.txt",
                 "gf-lfi.txt",
-                "gf-ssrf.txt",
                 "gf-ssti.txt",
                 "gf-sqli.txt",
             ]
@@ -392,21 +389,8 @@ class BucketFinder:
         """
         self.domains = domains
         self.output_file = output_file
-        self.vulnerable_buckets = []
-        self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "S3Scanner/1.0"})
 
         logger.info(f"{color.GREEN}Initialising BucketFinder...{color.END}")
-
-        try:
-            self.s3_client = boto3.client("s3")
-            self.boto3_available = True
-            logger.info(
-                f"{color.GREEN}boto3 client initialised successfully{color.END}"
-            )
-        except Exception as e:
-            self.boto3_available = False
-            logger.warning(f"{color.RED}boto3 initialisation failed: {e}{color.END}")
 
     def buckets_cli(self):
         """Main method to extract AWS CNAMEs and test buckets"""
@@ -417,7 +401,7 @@ class BucketFinder:
             logger.info(f"{color.SKY_BLUE}Reading CNAMEs from {cnames_file}{color.END}")
 
             with open(cnames_file, "r") as infile, open(
-                aws_cnames_output, "w"
+                    aws_cnames_output, "w"
             ) as outfile:
                 for line in infile:
                     parts = line.strip().split()
@@ -431,127 +415,9 @@ class BucketFinder:
             logger.info(
                 f"{color.SKY_BLUE}Starting to test bucket permissions...{color.END}"
             )
-            self.test_bucket_permissions(aws_cnames_output)
 
         except Exception as e:
             logger.exception(f"{color.RED}Error in buckets_cli: {e}{color.END}")
-
-    def test_bucket_permissions(self, aws_cnames_file):
-        """Test S3 buckets using HTTP and optionally boto3"""
-        try:
-            vuln_txt_path = f"{self.output_file}/vuln/aws_vuln_buckets.txt"
-            json_output_path = f"{self.output_file}/vuln/s3-buckets.json"
-
-            logger.info(
-                f"{color.SKY_BLUE}Testing bucket permissions listed in {aws_cnames_file}{color.END}"
-            )
-
-            with open(aws_cnames_file, "r") as f, open(vuln_txt_path, "w") as vuln_file:
-                for line in f:
-                    bucket_url = line.strip()
-                    if not bucket_url:
-                        continue
-
-                    bucket_name = bucket_url.split(".")[0]
-                    logger.debug(
-                        f"{color.BLUE}Testing bucket: {bucket_name}{color.END}"
-                    )
-
-                    result = self.test_single_bucket(bucket_name, bucket_url)
-
-                    if result["vulnerable"]:
-                        vuln_types = [k for k, v in result["permissions"].items() if v]
-                        msg = f"{color.RED}[+] {bucket_url} -> VULNERABLE -> {', '.join(vuln_types)}{color.END}"
-                        logger.warning(msg)
-                    else:
-                        msg = f"{color.GREEN}[-] {bucket_url} -> Secure{color.END}"
-                        logger.info(msg)
-
-                    vuln_file.write(msg + "\n")
-                    self.vulnerable_buckets.append(result)
-
-            with open(json_output_path, "w") as json_file:
-                json.dump(self.vulnerable_buckets, json_file, indent=2)
-                logger.info(
-                    f"{color.GREEN}Saved JSON results to {json_output_path}{color.END}"
-                )
-
-        except Exception as e:
-            logger.exception(
-                f"{color.RED}Error testing bucket permissions: {e}{color.END}"
-            )
-
-    def test_single_bucket(self, bucket_name, bucket_url):
-        """Test permissions for a single bucket"""
-        permissions = {
-            "listable": False,
-            "readable": False,
-            "writable": False,
-            "deletable": False,
-        }
-
-        # HTTP checks
-        try:
-            r = self.session.get(f"http://{bucket_url}", timeout=10)
-            if r.status_code == 200:
-                if "<ListBucketResult" in r.text:
-                    permissions["listable"] = True
-                else:
-                    permissions["readable"] = True
-        except requests.RequestException as e:
-            logger.debug(f"{color.RED}HTTP GET failed for {bucket_url}: {e}{color.END}")
-
-        # HTTP write/delete test
-        test_file = f"test_{bucket_name}.txt"
-        test_put_url = f"http://{bucket_name}.s3.amazonaws.com/{test_file}"
-        try:
-            put_resp = self.session.put(test_put_url, data="test", timeout=10)
-            if put_resp.status_code in [200, 201]:
-                permissions["writable"] = True
-                try:
-                    del_resp = self.session.delete(test_put_url, timeout=5)
-                    if del_resp.status_code == 204:
-                        permissions["deletable"] = True
-                except requests.RequestException:
-                    pass
-        except requests.RequestException as e:
-            logger.debug(
-                f"{color.RED}HTTP PUT/DELETE failed for {bucket_name}: {e}{color.END}"
-            )
-
-        # boto3 checks if available
-        if self.boto3_available:
-            try:
-                self.s3_client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
-                permissions["listable"] = True
-            except ClientError as e:
-                logger.debug(
-                    f"{color.RED}boto3 list_objects_v2 failed for {bucket_name}: {e}{color.END}"
-                )
-
-            try:
-                test_key = f"boto3_test_{bucket_name}.txt"
-                self.s3_client.put_object(Bucket=bucket_name, Key=test_key, Body="test")
-                permissions["writable"] = True
-                try:
-                    self.s3_client.delete_object(Bucket=bucket_name, Key=test_key)
-                    permissions["deletable"] = True
-                except ClientError as e:
-                    logger.debug(
-                        f"{color.RED}boto3 delete_object failed for {bucket_name}: {e}{color.END}"
-                    )
-            except ClientError as e:
-                logger.debug(
-                    f"{color.RED}boto3 put_object failed for {bucket_name}: {e}{color.END}"
-                )
-
-        return {
-            "bucket_name": bucket_name,
-            "bucket_url": bucket_url,
-            "permissions": permissions,
-            "vulnerable": any(permissions.values()),
-            "tested_with": "boto3+http" if self.boto3_available else "http-only",
-        }
 
 
 class UrlFinder:
@@ -590,14 +456,42 @@ class UrlFinder:
             js_extract_cmd = f"grep -E '\\.js($|\\?)' {urls} | sed 's/\\?.*$//' | anew {self.js_output}"
             subprocess.run(js_extract_cmd, shell=True, check=True)
 
+            # Run gf (tomnomnom/gf) patterns: read URLs from file, grep with named
+            # patterns from ~/.gf/*.json, append new lines via anew (cross-platform).
             gf_list = ["xss", "ssrf", "lfi", "sqli", "ssti"]
-            gf_output = f"{self.output_file}/urls/"
-            for gf in gf_list:
-                subprocess.run(
-                    f"cat {urls} | gf {gf} | anew {gf_output}gf-{gf}.txt",
-                    shell=True,
-                    check=True,
-                )
+            gf_output_dir = f"{self.output_file}/urls/"
+            for pattern in gf_list:
+                out_file = os.path.join(gf_output_dir, f"gf-{pattern}.txt")
+                try:
+                    with open(urls, "rb") as urls_f:
+                        p_gf = subprocess.run(
+                            ["gf", pattern],
+                            stdin=urls_f,
+                            capture_output=True,
+                            timeout=300,
+                        )
+                    # gf uses grep-style exit codes: 0 = match, 1 = no match (not fatal)
+                    if p_gf.stderr and p_gf.returncode not in (0, 1):
+                        logger.debug(
+                            f"gf {pattern} stderr: {p_gf.stderr.decode(errors='replace')}"
+                        )
+                    if not (p_gf.stdout and p_gf.stdout.strip()):
+                        continue
+                    subprocess.run(
+                        ["anew", out_file],
+                        input=p_gf.stdout,
+                        check=False,
+                        timeout=60,
+                    )
+                except FileNotFoundError:
+                    logger.warning(
+                        f"{color.RED}gf or anew not found in PATH; install from https://github.com/tomnomnom/gf and https://github.com/tomnomnom/anew{color.END}"
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"gf {pattern} timed out, skipping")
+                except Exception as e:
+                    logger.warning(f"gf {pattern} failed: {e}")
 
         except Exception as e:
             logger.exception(
@@ -610,8 +504,11 @@ class UrlFinder:
             logger.info(f"{color.GREEN}[+] Extracting JS files...{color.END}")
             # Read from the master all-urls file and extract JS file URLs into js_output.
             all_urls = f"{self.output_file}/urls/all-urls.txt"
-            js_command = f"grep -E '\\.js($|\\?)' {all_urls} | sed 's/\\?.*$//' | sort -u | anew {self.js_output}"
-            subprocess.run(js_command, shell=True, check=True)
+            extraction_command = (
+                f"grep -E '\\.(js|json)($|\\?)' {all_urls} | "
+                f"sed 's/\\?.*$//' | sort -u | anew {self.js_output}"
+            )
+            subprocess.run(extraction_command, shell=True, check=True, executable="/bin/bash")
             logger.info(
                 f"{color.GREEN}[+] Completed: JS files saved to {self.js_output}{color.END}"
             )
@@ -655,7 +552,6 @@ class UrlFinder:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
 
-
 class Nuclei:
     """Class to run Nuclei vulnerability scanner"""
 
@@ -693,8 +589,9 @@ class Nuclei:
             logger.exception(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
 
+
 class TelegramNotify:
-    def __init__(self, telegram_token, telegram_chat_id, timeout=10, max_retries=3):
+    def __init__(self, telegram_token, telegram_chat_id, timeout=5, max_retries=3):
         """
         Robust Telegram notifier with retries and exception handling.
 
