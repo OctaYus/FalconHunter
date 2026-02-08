@@ -79,6 +79,7 @@ declare -A go_tools=(
   [subzy]="github.com/PentestPad/subzy@latest"
   [subjack]="github.com/haccer/subjack@latest"
   [dalfox]="github.com/hahwul/dalfox/v2@latest"
+  [anew]="github.com/tomnomnom/anew@latest"
 )
 
 install_go_tools() {
