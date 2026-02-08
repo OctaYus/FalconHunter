@@ -213,6 +213,8 @@ class SubdomainsCollector:
                 subfinder_cmd = ["subfinder", "-dL", domains, "-all", "-o", output]
                 logger.info(f"{color.GREEN}(+) Subdomain enumeration{color.END}")
                 subprocess.run(subfinder_cmd)
+            else:
+                logger.error(f"{color.RED}Error: Subdomains file not found. Please run subfinder_subs method first.{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
@@ -232,14 +234,15 @@ class SubdomainsCollector:
                 "-o",
                 httpx_output,
             ]
-            awk = "'{print $1}'"
             logger.info(f"{color.GREEN}(+) Probing alive hosts{color.END}")
             subprocess.run(httpx_cmd)
-            subprocess.run(
-                f"cat {httpx_output} | awk {awk} | tee -a {alive_output}",
-                check=True,
-                shell=True,
-            )
+            # Safe alternative to extract first column: use list form, e.g.:
+            # subprocess.run(["awk", "{print $1}", httpx_output], stdout=open(alive_output, "a"), check=True)
+            with open(f"{self.output_file}", "r") as infile, open(f"alive_output", "a") as outfile:
+                for line in infile:
+                    http_domain = line.split()[0] if line.split() else ''
+                    if "http" or "https" in http_domain:
+                        outfile.write(http_domain + "\n")
 
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
@@ -374,6 +377,13 @@ class SubdomainTakeOver:
             logger.exception(
                 f"{color.RED}Error reading subdomains file: {e}{color.END}"
             )
+    def test_takeover(self):
+        """Test for potential subdomain takeovers"""
+        try:
+            pass
+
+        except Exception as e:
+            logger.exception(f"{color.RED}Error in test_takeover method: {e}{color.END}")
 
 
 class BucketFinder:
@@ -445,16 +455,62 @@ class UrlFinder:
 
         try:
             logger.info(f"{color.GREEN}(+) Collecting all URLs{color.END}")
-            commands = [
-                f"cat {subdomains_file} | waybackurls | anew {urls}",
-                f"cat {subdomains_file} | gau --subs | anew {urls}",
-            ]
-            for cmd in commands:
-                subprocess.run(cmd, shell=True, check=True)
+            # waybackurls: read hosts from file, append new URLs to urls (no shell)
+            with open(subdomains_file, "rb") as f_in:
+                p = subprocess.run(
+                    ["waybackurls"],
+                    stdin=f_in,
+                    capture_output=True,
+                    check=True,
+                    timeout=600,
+                )
+            if p.stdout.strip():
+                subprocess.run(
+                    ["anew", urls],
+                    input=p.stdout,
+                    check=True,
+                    timeout=60,
+                )
+            # gau --subs: same pipeline (no shell)
+            with open(subdomains_file, "rb") as f_in:
+                p = subprocess.run(
+                    ["gau", "--subs"],
+                    stdin=f_in,
+                    capture_output=True,
+                    check=True,
+                    timeout=600,
+                )
+            if p.stdout.strip():
+                subprocess.run(
+                    ["anew", urls],
+                    input=p.stdout,
+                    check=True,
+                    timeout=60,
+                )
 
-            # Extract JS URLs from the aggregated all-urls file
-            js_extract_cmd = f"grep -E '\\.js($|\\?)' {urls} | sed 's/\\?.*$//' | anew {self.js_output}"
-            subprocess.run(js_extract_cmd, shell=True, check=True)
+            # Extract JS URLs: grep then strip query strings in Python, then anew (no shell)
+            with open(urls, "rb") as f_in:
+                p = subprocess.run(
+                    ["grep", "-E", r"\.js($|\?)"],
+                    stdin=f_in,
+                    capture_output=True,
+                    timeout=120,
+                )
+            if p.returncode not in (0, 1):
+                p.check_returncode()
+            if p.stdout and p.stdout.strip():
+                lines = [
+                    line.decode("utf-8", errors="replace").split("?")[0].strip()
+                    for line in p.stdout.splitlines()
+                ]
+                unique = [ln + "\n" for ln in sorted(set(ln for ln in lines if ln))]
+                if unique:
+                    subprocess.run(
+                        ["anew", self.js_output],
+                        input=b"".join(x.encode("utf-8") for x in unique),
+                        check=True,
+                        timeout=60,
+                    )
 
             # Run gf (tomnomnom/gf) patterns: read URLs from file, grep with named
             # patterns from ~/.gf/*.json, append new lines via anew (cross-platform).
@@ -502,13 +558,33 @@ class UrlFinder:
         """Extract JavaScript files from collected URLs"""
         try:
             logger.info(f"{color.GREEN}[+] Extracting JS files...{color.END}")
-            # Read from the master all-urls file and extract JS file URLs into js_output.
             all_urls = f"{self.output_file}/urls/all-urls.txt"
-            extraction_command = (
-                f"grep -E '\\.(js|json)($|\\?)' {all_urls} | "
-                f"sed 's/\\?.*$//' | sort -u | anew {self.js_output}"
-            )
-            subprocess.run(extraction_command, shell=True, check=True, executable="/bin/bash")
+            with open(all_urls, "rb") as f_in:
+                p = subprocess.run(
+                    ["grep", "-E", r"\.(js|json)($|\?)"],
+                    stdin=f_in,
+                    capture_output=True,
+                    timeout=120,
+                )
+            if p.returncode not in (0, 1):
+                p.check_returncode()
+            if not (p.stdout and p.stdout.strip()):
+                logger.info(
+                    f"{color.GREEN}[+] Completed: JS files saved to {self.js_output}{color.END}"
+                )
+                return
+            lines = [
+                line.decode("utf-8", errors="replace").split("?")[0].strip()
+                for line in p.stdout.splitlines()
+            ]
+            unique = [ln + "\n" for ln in sorted(set(ln for ln in lines if ln))]
+            if unique:
+                subprocess.run(
+                    ["anew", self.js_output],
+                    input=b"".join(x.encode("utf-8") for x in unique),
+                    check=True,
+                    timeout=60,
+                )
             logger.info(
                 f"{color.GREEN}[+] Completed: JS files saved to {self.js_output}{color.END}"
             )
@@ -522,8 +598,21 @@ class UrlFinder:
                 f"{color.GREEN}[+] Extracting documents and backup files...{color.END}"
             )
             doc_file_types = r"\.xls|\.xml|\.xlsx|\.json|\.pdf|\.sql|\.doc|\.docx|\.pptx|\.txt|\.zip|\.tar\.gz|\.tgz|\.bak|\.7z|\.rar"
-            doc_command = f"grep -E '{doc_file_types}' {self.output_file}/urls/all-urls.txt | anew {self.leaked_docs}"
-            subprocess.run(doc_command, shell=True, check=True)
+            all_urls_path = f"{self.output_file}/urls/all-urls.txt"
+            p = subprocess.run(
+                ["grep", "-E", doc_file_types, all_urls_path],
+                capture_output=True,
+                timeout=120,
+            )
+            if p.returncode not in (0, 1):
+                p.check_returncode()
+            if p.stdout and p.stdout.strip():
+                subprocess.run(
+                    ["anew", self.leaked_docs],
+                    input=p.stdout,
+                    check=True,
+                    timeout=60,
+                )
             logger.info(
                 f"{color.GREEN}[+] Completed: Sensitive documents saved to {self.leaked_docs}{color.END}"
             )
@@ -536,15 +625,38 @@ class UrlFinder:
             logger.info(
                 f"{color.GREEN}[+] Extracting data from JS files using Mantra...{color.END}"
             )
-            mantra_command = (
-                f"cat {self.js_output} | mantra | anew {self.mantra_output}"
-            )
-            subprocess.run(mantra_command, shell=True, check=True)
+            with open(self.js_output, "rb") as f_in:
+                p = subprocess.run(
+                    ["mantra"],
+                    stdin=f_in,
+                    capture_output=True,
+                    check=True,
+                    timeout=600,
+                )
+            if p.stdout and p.stdout.strip():
+                subprocess.run(
+                    ["anew", self.mantra_output],
+                    input=p.stdout,
+                    check=True,
+                    timeout=60,
+                )
 
-            findings_command = (
-                f"cat {self.mantra_output} | grep '[+]' | anew {self.js_findings}"
-            )
-            subprocess.run(findings_command, shell=True, check=True)
+            with open(self.mantra_output, "rb") as f_in:
+                p = subprocess.run(
+                    ["grep", "[+]"],
+                    stdin=f_in,
+                    capture_output=True,
+                    timeout=120,
+                )
+            if p.returncode not in (0, 1):
+                p.check_returncode()
+            if p.stdout and p.stdout.strip():
+                subprocess.run(
+                    ["anew", self.js_findings],
+                    input=p.stdout,
+                    check=True,
+                    timeout=60,
+                )
             logger.info(
                 f"{color.GREEN}[+] Completed: Mantra JS findings saved to {self.js_findings}{color.END}"
             )
@@ -573,7 +685,7 @@ class Nuclei:
         try:
             nuclei_cmd = ["nuclei", "-l", hosts, "-o", output]
             logger.info(f"{color.GREEN}(+) Nuclei active scanning {color.END}")
-            subprocess.run(nuclei_cmd, shell=True, check=True)
+            subprocess.run(nuclei_cmd, check=True)
         except Exception as e:
             logger.exception(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
@@ -582,12 +694,16 @@ class Nuclei:
         urls = f"{self.output_file}/urls/all-urls.txt"
         output = f"{self.output_file}/vuln/nuclei-dast-output.txt"
         try:
-            nuclei_cmd = f"cat {urls} | nuclei --dast -o {output}"
-            subprocess.run(nuclei_cmd, check=True, shell=True)
+            with open(urls, "rb") as f_in:
+                subprocess.run(
+                    ["nuclei", "--dast", "-o", output],
+                    stdin=f_in,
+                    check=True,
+                    timeout=3600,
+                )
             logger.info(f"{color.GREEN}(+) Nuclei dast active scanning {color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}(-) Error occurred: {e}{color.END}")
-
 
 
 class TelegramNotify:
