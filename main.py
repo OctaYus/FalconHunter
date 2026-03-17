@@ -1,7 +1,9 @@
 import argparse
 import json
 import os
+import re
 import subprocess
+import shutil
 import time
 from datetime import datetime as date
 import logging
@@ -135,6 +137,7 @@ class MakeDirectories:
                 "filtered-urls.txt",
                 "js-files.txt",
                 "leaked-docs.txt",
+                "mantra_output.txt",
                 "params.txt",
                 "gf-xss.txt",
                 "gf-ssrf.txt",
@@ -209,12 +212,11 @@ class SubdomainsCollector:
         domains = self.domains
         output = f"{self.output_file}/hosts/subs.txt"
         try:
-            if os.path.isfile(output):
-                subfinder_cmd = ["subfinder", "-dL", domains, "-all", "-o", output]
-                logger.info(f"{color.GREEN}(+) Subdomain enumeration{color.END}")
-                subprocess.run(subfinder_cmd)
-            else:
-                logger.error(f"{color.RED}Error: Subdomains file not found. Please run subfinder_subs method first.{color.END}")
+            subfinder_cmd = ["subfinder", "-dL", domains, "-all", "-o", output]
+            logger.info(f"{color.GREEN}(+) Subdomain enumeration{color.END}")
+            subprocess.run(subfinder_cmd, check=True)
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) subfinder not found in PATH{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
@@ -235,15 +237,29 @@ class SubdomainsCollector:
                 httpx_output,
             ]
             logger.info(f"{color.GREEN}(+) Probing alive hosts{color.END}")
-            subprocess.run(httpx_cmd)
-            # Safe alternative to extract first column: use list form, e.g.:
-            # subprocess.run(["awk", "{print $1}", httpx_output], stdout=open(alive_output, "a"), check=True)
-            with open(f"{self.output_file}", "r") as infile, open(f"alive_output", "a") as outfile:
+            subprocess.run(httpx_cmd, check=True)
+            # Append only new alive targets to avoid duplicates across reruns.
+            existing = set()
+            if os.path.isfile(alive_output):
+                with open(alive_output, "r", encoding="utf-8", errors="replace") as existing_f:
+                    for line in existing_f:
+                        existing.add(line.strip())
+            new_lines = []
+            with open(httpx_output, "r", encoding="utf-8", errors="replace") as infile:
                 for line in infile:
-                    http_domain = line.split()[0] if line.split() else ''
-                    if "http" or "https" in http_domain:
-                        outfile.write(http_domain + "\n")
+                    parts = line.split()
+                    if not parts:
+                        continue
+                    http_domain = parts[0]
+                    if "http" in http_domain and http_domain not in existing:
+                        existing.add(http_domain)
+                        new_lines.append(http_domain)
+            if new_lines:
+                with open(alive_output, "a", encoding="utf-8") as outfile:
+                    outfile.write("\n".join(new_lines) + "\n")
 
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) httpx not found in PATH{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
@@ -273,12 +289,15 @@ class DmarcFinder:
             bool: True if SPF record exists, False otherwise
         """
         try:
-            answers = dns.resolver.resolve(domain, "TXT")
+            resolver = dns.resolver.Resolver()
+            resolver.timeout = 3
+            resolver.lifetime = 6
+            answers = resolver.resolve(domain, "TXT")
             for record in answers:
                 if record.to_text().startswith('"v=spf1'):
                     return True
             return False
-        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
             return False
         except Exception as e:
             logger.exception(f"Error checking SPF for {domain}: {e}")
@@ -295,12 +314,15 @@ class DmarcFinder:
             bool: True if DMARC record exists, False otherwise
         """
         try:
-            answers = dns.resolver.resolve(f"_dmarc.{domain}", "TXT")
+            resolver = dns.resolver.Resolver()
+            resolver.timeout = 3
+            resolver.lifetime = 6
+            answers = resolver.resolve(f"_dmarc.{domain}", "TXT")
             for record in answers:
                 if record.to_text().startswith('"v=DMARC1'):
                     return True
             return False
-        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
             return False
         except Exception as e:
             logger.exception(f"Error checking DMARC for {domain}: {e}")
@@ -344,7 +366,7 @@ class DmarcFinder:
 class SubdomainTakeOver:
     """Class to check for potential subdomain takeovers"""
 
-    def __init__(self, domains, output_file):
+    def __init__(self, domains, output_file, auth0_email=""):
         """
         Initialize with domains file and output directory
 
@@ -354,36 +376,96 @@ class SubdomainTakeOver:
         """
         self.domains = domains
         self.output_file = output_file
+        self.auth0_email = auth0_email
 
     def get_cname(self):
         """Get CNAME records for all subdomains"""
-        logger.info(
-            f"{color.GREEN}(+) CNAME analysis for possible takeovers{color.END}"
-        )
-
         output = f"{self.output_file}/hosts/cnames.txt"
         subdomains_file = f"{self.output_file}/hosts/subs.txt"
-
         try:
-            cnfinder_cmd = ["cnfinder", "-l", subdomains_file, "-o", output]
-            subprocess.run(cnfinder_cmd, check=True)
-
-            with open(output, "r") as f:
-                cnames = f.read().splitlines()
-
-            logger.info(f"{color.GREEN}(+) Found total of: {len(cnames)} CNAME. {color.END}")
-
-        except Exception as e:
-            logger.exception(
-                f"{color.RED}Error reading subdomains file: {e}{color.END}"
+            if not os.path.isfile(subdomains_file) or os.path.getsize(subdomains_file) == 0:
+                logger.warning(f"{color.RED}(-) No subdomains file or empty, skipping CNAME{color.END}")
+                return
+            logger.info(
+                f"{color.GREEN}(+) CNAME analysis for possible takeovers{color.END}"
             )
-    def test_takeover(self):
-        """Test for potential subdomain takeovers"""
-        try:
-            pass
-
+            cnfinder_cmd = ["cnfinder", "-l", subdomains_file, "-o", output]
+            p = subprocess.run(cnfinder_cmd, capture_output=True, timeout=300)
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"cnfinder stderr: {p.stderr.decode(errors='replace')}")
+            if os.path.isfile(output) and os.path.getsize(output) > 0:
+                with open(output, "r", encoding="utf-8", errors="replace") as f:
+                    cnames = f.read().splitlines()
+                logger.info(f"{color.GREEN}(+) Found total of: {len(cnames)} CNAME. {color.END}")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) cnfinder not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) cnfinder timed out{color.END}")
         except Exception as e:
-            logger.exception(f"{color.RED}Error in test_takeover method: {e}{color.END}")
+            logger.exception(f"{color.RED}Error reading subdomains/CNAME: {e}{color.END}")
+    def test_takeover(self):
+        """Test for potential subdomain takeovers using subjack and subzy (optional tools)."""
+        subs_file = f"{self.output_file}/hosts/subs.txt"
+        subjack_out = f"{self.output_file}/vuln/subjack.txt"
+        subzy_out = f"{self.output_file}/vuln/subzy.txt"
+        if not os.path.isfile(subs_file) or os.path.getsize(subs_file) == 0:
+            logger.debug("No subdomains file for takeover tests, skipping")
+            return
+        try:
+            logger.info(f"{color.GREEN}(+) Running subjack for takeover detection{color.END}")
+            p = subprocess.run(
+                ["subjack", "-w", subs_file, "-t", "100", "-timeout", "30", "-o", subjack_out],
+                capture_output=True,
+                timeout=600,
+            )
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"subjack stderr: {p.stderr.decode(errors='replace')}")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) subjack not found in PATH (optional){color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) subjack timed out{color.END}")
+        try:
+            logger.info(f"{color.GREEN}(+) Running subzy for takeover detection{color.END}")
+            p = subprocess.run(
+                ["subzy", "run", "--targets", subs_file],
+                capture_output=True,
+                timeout=600,
+                cwd=self.output_file,
+            )
+            if p.stdout and p.returncode == 0:
+                with open(subzy_out, "wb") as f:
+                    f.write(p.stdout)
+            elif p.returncode != 0 and p.stderr:
+                logger.debug(f"subzy stderr: {p.stderr.decode(errors='replace')}")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) subzy not found in PATH (optional){color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) subzy timed out{color.END}")
+        except Exception as e:
+            logger.debug(f"subzy failed: {e}")
+
+    def auth0(self):
+        """
+        Test for Auth0 unauthenticated account creation (BadAuth0).
+        """
+        if self.auth0_email:
+            try:
+                logger.info(f"{color.GREEN}(+) Testing for Auth0 self account signup{color.END}")
+                tenants_file = f"{self.output_file}/hosts/alive-hosts.txt"
+                badauth0_cmd = [
+                    "badauth",
+                    "-l",
+                    tenants_file,
+                    "-o",
+                    os.path.join(self.output_file, "auth0"),
+                    "-e",
+                    self.auth0_email,
+                ]
+                subprocess.run(badauth0_cmd, check=True)
+            except FileNotFoundError:
+                logger.warning(f"{color.RED}(-) badauth not found in PATH{color.END}")
+            except Exception as e:
+                logger.exception(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
 
 class BucketFinder:
@@ -403,29 +485,48 @@ class BucketFinder:
         logger.info(f"{color.GREEN}Initialising BucketFinder...{color.END}")
 
     def buckets_cli(self):
-        """Main method to extract AWS CNAMEs and test buckets"""
+        """Main method to extract AWS CNAMEs and optionally test bucket permissions (s3scanner if in PATH)."""
+        cnames_file = f"{self.output_file}/hosts/cnames.txt"
+        aws_cnames_output = f"{self.output_file}/hosts/aws_cnames.txt"
         try:
-            cnames_file = f"{self.output_file}/hosts/cnames.txt"
-            aws_cnames_output = f"{self.output_file}/hosts/aws_cnames.txt"
-
+            if not os.path.isfile(cnames_file) or os.path.getsize(cnames_file) == 0:
+                logger.warning(f"{color.RED}(-) CNAMEs file missing or empty, skipping BucketFinder{color.END}")
+                return
             logger.info(f"{color.SKY_BLUE}Reading CNAMEs from {cnames_file}{color.END}")
-
-            with open(cnames_file, "r") as infile, open(
-                    aws_cnames_output, "w"
+            bucket_count = 0
+            with open(cnames_file, "r", encoding="utf-8", errors="replace") as infile, open(
+                    aws_cnames_output, "w", encoding="utf-8"
             ) as outfile:
                 for line in infile:
                     parts = line.strip().split()
                     if len(parts) >= 3 and "s3" in parts[2] and "amazonaws" in parts[2]:
                         bucket = parts[2].strip(".")
                         outfile.write(bucket + "\n")
+                        bucket_count += 1
                         logger.debug(
                             f"{color.BLUE}Found AWS CNAME: {bucket}{color.END}"
                         )
 
-            logger.info(
-                f"{color.SKY_BLUE}Starting to test bucket permissions...{color.END}"
-            )
-
+            if bucket_count > 0:
+                logger.info(
+                    f"{color.SKY_BLUE}AWS CNAMEs written to {aws_cnames_output}. "
+                    "To test bucket permissions, install e.g. s3scanner and run it on that file.{color.END}"
+                )
+                try:
+                    if shutil.which("s3scanner"):
+                        scan_out = f"{self.output_file}/vuln/aws_vuln_bucket.txt"
+                        subprocess.run(
+                            ["s3scanner", "scan", "-l", aws_cnames_output, "-o", scan_out],
+                            capture_output=True,
+                            timeout=900,
+                        )
+                        logger.info(f"{color.GREEN}(+) s3scanner bucket check completed{color.END}")
+                except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+                    logger.debug(f"s3scanner skip: {e}")
+            else:
+                logger.info(f"{color.SKY_BLUE}No AWS CNAMEs found in CNAME list.{color.END}")
+        except FileNotFoundError as e:
+            logger.warning(f"{color.RED}(-) {e}{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error in buckets_cli: {e}{color.END}")
 
@@ -443,10 +544,36 @@ class UrlFinder:
         """
         self.domains = domains
         self.output_file = output_file
+        self.all_urls = f"{self.output_file}/urls/all-urls.txt"
         self.js_output = f"{self.output_file}/urls/js-files.txt"
         self.leaked_docs = f"{self.output_file}/urls/leaked-docs.txt"
-        self.mantra_output = f"{self.output_file}/urls/mantra-output.txt"
+        self.mantra_output = f"{self.output_file}/urls/mantra_output.txt"
         self.js_findings = f"{self.output_file}/urls/js-findings.txt"
+
+    def _filter_urls_by_regex(self, urls_file, pattern_re, dest_file):
+        """Filter lines from urls_file by regex (Python-based, Windows-safe, no grep). Append unique lines to dest_file via anew."""
+        try:
+            if not os.path.isfile(urls_file) or os.path.getsize(urls_file) == 0:
+                return
+            pattern = re.compile(pattern_re)
+            with open(urls_file, "rb") as f:
+                lines = [
+                    line.decode("utf-8", errors="replace").split("?")[0].strip()
+                    for line in f
+                    if pattern.search(line.decode("utf-8", errors="replace"))
+                ]
+            unique = sorted(set(ln for ln in lines if ln))
+            if not unique:
+                return
+            out = b"".join((ln + "\n").encode("utf-8") for ln in unique)
+            subprocess.run(
+                ["anew", dest_file],
+                input=out,
+                capture_output=True,
+                timeout=60,
+            )
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) anew not found in PATH{color.END}")
 
     def collect_urls(self):
         """Collect URLs from various sources (wayback, gau, etc)"""
@@ -456,61 +583,59 @@ class UrlFinder:
         try:
             logger.info(f"{color.GREEN}(+) Collecting all URLs{color.END}")
             # waybackurls: read hosts from file, append new URLs to urls (no shell)
-            with open(subdomains_file, "rb") as f_in:
-                p = subprocess.run(
-                    ["waybackurls"],
-                    stdin=f_in,
-                    capture_output=True,
-                    check=True,
-                    timeout=600,
-                )
-            if p.stdout.strip():
-                subprocess.run(
-                    ["anew", urls],
-                    input=p.stdout,
-                    check=True,
-                    timeout=60,
-                )
-            # gau --subs: same pipeline (no shell)
-            with open(subdomains_file, "rb") as f_in:
-                p = subprocess.run(
-                    ["gau", "--subs"],
-                    stdin=f_in,
-                    capture_output=True,
-                    check=True,
-                    timeout=600,
-                )
-            if p.stdout.strip():
-                subprocess.run(
-                    ["anew", urls],
-                    input=p.stdout,
-                    check=True,
-                    timeout=60,
-                )
+            try:
+                if not os.path.isfile(subdomains_file) or os.path.getsize(subdomains_file) == 0:
+                    logger.warning(f"{color.RED}(-) alive-hosts file missing or empty, skipping waybackurls{color.END}")
+                else:
+                    with open(subdomains_file, "rb") as f_in:
+                        p = subprocess.run(
+                            ["waybackurls"],
+                            stdin=f_in,
+                            capture_output=True,
+                            timeout=600,
+                        )
+                    if p.returncode != 0 and p.stderr:
+                        logger.debug(f"waybackurls stderr: {p.stderr.decode(errors='replace')}")
+                    if p.stdout and p.stdout.strip():
+                        subprocess.run(
+                            ["anew", urls],
+                            input=p.stdout,
+                            capture_output=True,
+                            timeout=60,
+                        )
+            except FileNotFoundError:
+                logger.warning(f"{color.RED}(-) waybackurls or anew not found in PATH{color.END}")
+            except subprocess.TimeoutExpired:
+                logger.warning("waybackurls timed out, skipping")
 
-            # Extract JS URLs: grep then strip query strings in Python, then anew (no shell)
-            with open(urls, "rb") as f_in:
-                p = subprocess.run(
-                    ["grep", "-E", r"\.js($|\?)"],
-                    stdin=f_in,
-                    capture_output=True,
-                    timeout=120,
-                )
-            if p.returncode not in (0, 1):
-                p.check_returncode()
-            if p.stdout and p.stdout.strip():
-                lines = [
-                    line.decode("utf-8", errors="replace").split("?")[0].strip()
-                    for line in p.stdout.splitlines()
-                ]
-                unique = [ln + "\n" for ln in sorted(set(ln for ln in lines if ln))]
-                if unique:
-                    subprocess.run(
-                        ["anew", self.js_output],
-                        input=b"".join(x.encode("utf-8") for x in unique),
-                        check=True,
-                        timeout=60,
-                    )
+            # gau --subs: same pipeline (no shell)
+            try:
+                if os.path.isfile(subdomains_file) and os.path.getsize(subdomains_file) > 0:
+                    with open(subdomains_file, "rb") as f_in:
+                        p = subprocess.run(
+                            ["gau", "--subs"],
+                            stdin=f_in,
+                            capture_output=True,
+                            timeout=600,
+                        )
+                    if p.returncode != 0 and p.stderr:
+                        logger.debug(f"gau stderr: {p.stderr.decode(errors='replace')}")
+                    if p.stdout and p.stdout.strip():
+                        subprocess.run(
+                            ["anew", urls],
+                            input=p.stdout,
+                            capture_output=True,
+                            timeout=60,
+                        )
+            except FileNotFoundError:
+                logger.warning(f"{color.RED}(-) gau not found in PATH{color.END}")
+            except subprocess.TimeoutExpired:
+                logger.warning("gau timed out, skipping")
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"gau failed: {e}")
+
+            # Extract JS URLs with Python regex (Windows-safe, no grep)
+            self._filter_urls_by_regex(urls, r"\.js($|\?)", self.js_output)
 
             # Run gf (tomnomnom/gf) patterns: read URLs from file, grep with named
             # patterns from ~/.gf/*.json, append new lines via anew (cross-platform).
@@ -555,67 +680,39 @@ class UrlFinder:
             )
 
     def extract_js_files(self):
-        """Extract JavaScript files from collected URLs"""
+        """Extract JavaScript files from collected URLs (Python regex, Windows-safe)"""
         try:
             logger.info(f"{color.GREEN}[+] Extracting JS files...{color.END}")
             all_urls = f"{self.output_file}/urls/all-urls.txt"
-            with open(all_urls, "rb") as f_in:
-                p = subprocess.run(
-                    ["grep", "-E", r"\.(js|json)($|\?)"],
-                    stdin=f_in,
-                    capture_output=True,
-                    timeout=120,
-                )
-            if p.returncode not in (0, 1):
-                p.check_returncode()
-            if not (p.stdout and p.stdout.strip()):
-                logger.info(
-                    f"{color.GREEN}[+] Completed: JS files saved to {self.js_output}{color.END}"
-                )
+            if not os.path.isfile(all_urls) or os.path.getsize(all_urls) == 0:
+                logger.warning(f"{color.RED}(-) all-urls.txt missing or empty, skipping JS extraction{color.END}")
                 return
-            lines = [
-                line.decode("utf-8", errors="replace").split("?")[0].strip()
-                for line in p.stdout.splitlines()
-            ]
-            unique = [ln + "\n" for ln in sorted(set(ln for ln in lines if ln))]
-            if unique:
-                subprocess.run(
-                    ["anew", self.js_output],
-                    input=b"".join(x.encode("utf-8") for x in unique),
-                    check=True,
-                    timeout=60,
-                )
+            self._filter_urls_by_regex(all_urls, r"\.(js|json)($|\?)", self.js_output)
             logger.info(
                 f"{color.GREEN}[+] Completed: JS files saved to {self.js_output}{color.END}"
             )
+        except FileNotFoundError as e:
+            logger.warning(f"{color.RED}(-) {e}{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
     def extract_documents(self):
-        """Extract document and backup files from collected URLs"""
+        """Extract document and backup files from collected URLs (Python regex, Windows-safe)"""
         try:
             logger.info(
                 f"{color.GREEN}[+] Extracting documents and backup files...{color.END}"
             )
             doc_file_types = r"\.xls|\.xml|\.xlsx|\.json|\.pdf|\.sql|\.doc|\.docx|\.pptx|\.txt|\.zip|\.tar\.gz|\.tgz|\.bak|\.7z|\.rar"
             all_urls_path = f"{self.output_file}/urls/all-urls.txt"
-            p = subprocess.run(
-                ["grep", "-E", doc_file_types, all_urls_path],
-                capture_output=True,
-                timeout=120,
-            )
-            if p.returncode not in (0, 1):
-                p.check_returncode()
-            if p.stdout and p.stdout.strip():
-                subprocess.run(
-                    ["anew", self.leaked_docs],
-                    input=p.stdout,
-                    check=True,
-                    timeout=60,
-                )
+            if not os.path.isfile(all_urls_path) or os.path.getsize(all_urls_path) == 0:
+                logger.warning(f"{color.RED}(-) all-urls.txt missing or empty, skipping document extraction{color.END}")
+                return
+            self._filter_urls_by_regex(all_urls_path, doc_file_types, self.leaked_docs)
             logger.info(
                 f"{color.GREEN}[+] Completed: Sensitive documents saved to {self.leaked_docs}{color.END}"
             )
+        except FileNotFoundError as e:
+            logger.warning(f"{color.RED}(-) {e}{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
@@ -625,41 +722,19 @@ class UrlFinder:
             logger.info(
                 f"{color.GREEN}[+] Extracting data from JS files using Mantra...{color.END}"
             )
-            with open(self.js_output, "rb") as f_in:
-                p = subprocess.run(
-                    ["mantra"],
-                    stdin=f_in,
-                    capture_output=True,
-                    check=True,
-                    timeout=600,
-                )
-            if p.stdout and p.stdout.strip():
-                subprocess.run(
-                    ["anew", self.mantra_output],
-                    input=p.stdout,
-                    check=True,
-                    timeout=60,
-                )
+            mantra_files = [self.all_urls, self.js_output]
+            for i in mantra_files:
+                subprocess.run(f"cat {i} | mantra | anew {self.mantra_output}", check=True, shell=True)
 
-            with open(self.mantra_output, "rb") as f_in:
-                p = subprocess.run(
-                    ["grep", "[+]"],
-                    stdin=f_in,
-                    capture_output=True,
-                    timeout=120,
-                )
-            if p.returncode not in (0, 1):
-                p.check_returncode()
-            if p.stdout and p.stdout.strip():
-                subprocess.run(
-                    ["anew", self.js_findings],
-                    input=p.stdout,
-                    check=True,
-                    timeout=60,
-                )
             logger.info(
-                f"{color.GREEN}[+] Completed: Mantra JS findings saved to {self.js_findings}{color.END}"
+                f"{color.GREEN}[+] Completed: Mantra findings saved to {self.mantra_output}{color.END}"
             )
+        except FileNotFoundError:
+            logger.warning(
+                f"{color.RED}(-) mantra or anew not found in PATH{color.END}"
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) mantra timed out{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
 
@@ -683,9 +758,18 @@ class Nuclei:
         hosts = f"{self.output_file}/hosts/alive-hosts.txt"
         output = f"{self.output_file}/vuln/nuclei-output.txt"
         try:
+            if not os.path.isfile(hosts) or os.path.getsize(hosts) == 0:
+                logger.warning(f"{color.RED}(-) No alive hosts file for Nuclei, skipping{color.END}")
+                return
             nuclei_cmd = ["nuclei", "-l", hosts, "-o", output]
             logger.info(f"{color.GREEN}(+) Nuclei active scanning {color.END}")
-            subprocess.run(nuclei_cmd, check=True)
+            p = subprocess.run(nuclei_cmd, capture_output=True, timeout=3600)
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"nuclei stderr: {p.stderr.decode(errors='replace')}")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) nuclei not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) nuclei timed out{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
@@ -694,14 +778,23 @@ class Nuclei:
         urls = f"{self.output_file}/urls/all-urls.txt"
         output = f"{self.output_file}/vuln/nuclei-dast-output.txt"
         try:
+            if not os.path.isfile(urls) or os.path.getsize(urls) == 0:
+                logger.warning(f"{color.RED}(-) No URLs file for Nuclei DAST, skipping{color.END}")
+                return
             with open(urls, "rb") as f_in:
-                subprocess.run(
+                p = subprocess.run(
                     ["nuclei", "--dast", "-o", output],
                     stdin=f_in,
-                    check=True,
+                    capture_output=True,
                     timeout=3600,
                 )
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"nuclei dast stderr: {p.stderr.decode(errors='replace')}")
             logger.info(f"{color.GREEN}(+) Nuclei dast active scanning {color.END}")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) nuclei not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) nuclei DAST timed out{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
@@ -817,18 +910,46 @@ def load_config(config_path="config.yaml"):
     """Load configuration from YAML file"""
     try:
         with open(config_path, "r") as f:
-            return yaml.safe_load(f)
+            config = yaml.safe_load(f)
+            if not isinstance(config, dict):
+                raise ValueError("Config file is empty or invalid")
+            return config
     except FileNotFoundError:
         logger.warning(
             f"{color.RED}(!) Config file not found, using defaults{color.END}"
         )
         return {
             "telegram": {"token": "", "chat_id": ""},
-            "cleanup": {"remove_empty_files": True, "remove_empty_dirs": True},
+            "cleanup": {"enabled": True, "remove_empty_files": True, "remove_empty_dirs": True},
+        }
+    except ValueError as e:
+        logger.warning(f"{color.RED}{e}; using defaults{color.END}")
+        return {
+            "telegram": {"token": "", "chat_id": ""},
+            "cleanup": {"enabled": True, "remove_empty_files": True, "remove_empty_dirs": True},
         }
     except Exception as e:
         logger.error(f"{color.RED}Error loading config: {e}{color.END}")
         raise
+
+
+def check_tools():
+    """Check for required and optional CLI tools in PATH. Required: subfinder, httpx, waybackurls, anew. Optional: gau, gf, cnfinder, badauth, mantra, nuclei, subjack, subzy, s3scanner."""
+    required = ["subfinder", "httpx", "waybackurls", "anew"]
+    optional = ["gau", "gf", "cnfinder", "badauth", "mantra", "nuclei", "subjack", "subzy", "s3scanner"]
+    missing_required = [n for n in required if not shutil.which(n)]
+    missing_optional = [n for n in optional if not shutil.which(n)]
+    if missing_required:
+        logger.warning(
+            f"{color.RED}(!) Missing required tools (add to PATH): {', '.join(missing_required)}{color.END}"
+        )
+    if missing_optional:
+        logger.info(
+            f"{color.SKY_BLUE}(i) Optional tools not in PATH: {', '.join(missing_optional)}{color.END}"
+        )
+    if not missing_required and not missing_optional:
+        logger.info(f"{color.GREEN}(+) All checked tools found in PATH{color.END}")
+    return len(missing_required) == 0
 
 
 def done():
@@ -857,11 +978,28 @@ def main():
         "-c", "--config", default="config.yaml", help="Path to config file"
     )
     parser.add_argument(
+        "--nuclei",
+        action="store_true",
+        help="Run Nuclei scans (optional)",
+    )
+    parser.add_argument(
+        "-e", "--email", help="Email to test for auth0 misconfigurations"
+    )
+    parser.add_argument(
         "--cleanup-only",
         action="store_true",
         help="Run only the cleanup process on existing output directory",
     )
+    parser.add_argument(
+        "--check-tools",
+        action="store_true",
+        help="Check for required/optional CLI tools in PATH and exit (see docs for tool list)",
+    )
     args = parser.parse_args()
+
+    if args.check_tools:
+        check_tools()
+        return
 
     # Load configuration
     config = load_config(args.config)
@@ -961,8 +1099,10 @@ def main():
 
     try:
         # Execute SubdomainTakeOver and notify
-        subdomains_takeover = SubdomainTakeOver(domains, output_file)
+        subdomains_takeover = SubdomainTakeOver(domains, output_file, args.email or "")
         subdomains_takeover.get_cname()
+        subdomains_takeover.test_takeover()
+        subdomains_takeover.auth0()
         notifier.notify_telegram(
             telegram_token, telegram_chat_id, "(+) Subdomain takeover tests completed"
         )
@@ -999,20 +1139,21 @@ def main():
         notifier.notify_telegram(
             telegram_token, telegram_chat_id, "(-) URL scan failed"
         )
-    try:
-        # Execute Nuclei and notify
-        nuclei = Nuclei(domains, output_file)
-        nuclei.basic_nuclei()
-        nuclei.dast_nuclei()
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(+) Nuclei scan completed"
-        )
-        logger.info("Nuclei scan completed")
-    except Exception as e:
-        logger.exception("Failed during Nuclei scan")
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(-) Nuclei scan failed"
-        )
+    if args.nuclei:
+        try:
+            # Execute Nuclei and notify
+            nuclei = Nuclei(domains, output_file)
+            nuclei.basic_nuclei()
+            nuclei.dast_nuclei()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) Nuclei scan completed"
+            )
+            logger.info("Nuclei scan completed")
+        except Exception as e:
+            logger.exception("Failed during Nuclei scan")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) Nuclei scan failed"
+            )
 
     try:
         # The scan is done, notify
