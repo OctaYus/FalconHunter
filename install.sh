@@ -74,12 +74,14 @@ declare -A go_tools=(
   [gf]="github.com/tomnomnom/gf@latest"
   [qsreplace]="github.com/tomnomnom/qsreplace@latest"
   [freq]="github.com/m1ndo/freq@latest"
-  [mantra]="github.com/Brosck/mantra@latest"
+  [mantra]="github.com/brosck/mantra@latest"
   [nuclei]="github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
   [subzy]="github.com/PentestPad/subzy@latest"
   [subjack]="github.com/haccer/subjack@latest"
   [dalfox]="github.com/hahwul/dalfox/v2@latest"
   [anew]="github.com/tomnomnom/anew@latest"
+  [cnfinder]="github.com/OctaYus/cnfinder@latest"
+  
 )
 
 install_go_tools() {
