@@ -1,1 +1,128 @@
 
+2026-03-18 17:18:56,841 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:18:58,886 - INFO - mk_dirs - [32m[+] hosts Directory successfully created[0m
+2026-03-18 17:18:58,909 - INFO - mk_dirs - [32m[+] urls Directory successfully created[0m
+2026-03-18 17:18:58,931 - INFO - mk_dirs - [32m[+] js Directory successfully created[0m
+2026-03-18 17:18:58,954 - INFO - mk_dirs - [32m[+] vuln Directory successfully created[0m
+2026-03-18 17:18:58,954 - INFO - mk_dirs - 
+[38;5;153m========================================[0m
+
+2026-03-18 17:18:58,977 - INFO - mk_dirs - [38;5;153m[+] alive-hosts.txt File successfully created[0m
+2026-03-18 17:18:59,000 - INFO - mk_dirs - [38;5;153m[+] httpx.txt File successfully created[0m
+2026-03-18 17:18:59,023 - INFO - mk_dirs - [38;5;153m[+] subs.txt File successfully created[0m
+2026-03-18 17:18:59,046 - INFO - mk_dirs - [38;5;153m[+] https-alive.txt File successfully created[0m
+2026-03-18 17:18:59,069 - INFO - mk_dirs - [38;5;153m[+] asn.txt File successfully created[0m
+2026-03-18 17:18:59,092 - INFO - mk_dirs - [38;5;153m[+] cnames.txt File successfully created[0m
+2026-03-18 17:18:59,115 - INFO - mk_dirs - [38;5;153m[+] all-urls.txt File successfully created[0m
+2026-03-18 17:18:59,138 - INFO - mk_dirs - [38;5;153m[+] filtered-urls.txt File successfully created[0m
+2026-03-18 17:18:59,161 - INFO - mk_dirs - [38;5;153m[+] js-files.txt File successfully created[0m
+2026-03-18 17:18:59,184 - INFO - mk_dirs - [38;5;153m[+] leaked-docs.txt File successfully created[0m
+2026-03-18 17:18:59,207 - INFO - mk_dirs - [38;5;153m[+] mantra_output.txt File successfully created[0m
+2026-03-18 17:18:59,231 - INFO - mk_dirs - [38;5;153m[+] params.txt File successfully created[0m
+2026-03-18 17:18:59,253 - INFO - mk_dirs - [38;5;153m[+] gf-xss.txt File successfully created[0m
+2026-03-18 17:18:59,276 - INFO - mk_dirs - [38;5;153m[+] gf-ssrf.txt File successfully created[0m
+2026-03-18 17:18:59,299 - INFO - mk_dirs - [38;5;153m[+] gf-lfi.txt File successfully created[0m
+2026-03-18 17:18:59,322 - INFO - mk_dirs - [38;5;153m[+] gf-ssti.txt File successfully created[0m
+2026-03-18 17:18:59,345 - INFO - mk_dirs - [38;5;153m[+] gf-sqli.txt File successfully created[0m
+2026-03-18 17:18:59,368 - INFO - mk_dirs - [38;5;153m[+] nuclei-output.txt File successfully created[0m
+2026-03-18 17:18:59,391 - INFO - mk_dirs - [38;5;153m[+] nuclei-dast-output.txt File successfully created[0m
+2026-03-18 17:18:59,414 - INFO - mk_dirs - [38;5;153m[+] xss.txt File successfully created[0m
+2026-03-18 17:18:59,437 - INFO - mk_dirs - [38;5;153m[+] lfi.txt File successfully created[0m
+2026-03-18 17:18:59,460 - INFO - mk_dirs - [38;5;153m[+] ssrf.txt File successfully created[0m
+2026-03-18 17:18:59,483 - INFO - mk_dirs - [38;5;153m[+] sqli.txt File successfully created[0m
+2026-03-18 17:18:59,506 - INFO - mk_dirs - [38;5;153m[+] ssti.txt File successfully created[0m
+2026-03-18 17:18:59,529 - INFO - mk_dirs - [38;5;153m[+] js-findings.txt File successfully created[0m
+2026-03-18 17:18:59,551 - INFO - mk_dirs - [38;5;153m[+] missing-dmarc.json File successfully created[0m
+2026-03-18 17:18:59,574 - INFO - mk_dirs - [38;5;153m[+] origin-ips.json File successfully created[0m
+2026-03-18 17:18:59,597 - INFO - mk_dirs - [38;5;153m[+] s3-buckets.json File successfully created[0m
+2026-03-18 17:18:59,620 - INFO - mk_dirs - [38;5;153m[+] ips.txt File successfully created[0m
+2026-03-18 17:18:59,643 - INFO - mk_dirs - [38;5;153m[+] alive-ips.txt File successfully created[0m
+2026-03-18 17:18:59,666 - INFO - mk_dirs - [38;5;153m[+] xss_output.txt File successfully created[0m
+2026-03-18 17:18:59,689 - INFO - mk_dirs - [38;5;153m[+] takeovers.json File successfully created[0m
+2026-03-18 17:18:59,712 - INFO - mk_dirs - [38;5;153m[+] mantra.txt File successfully created[0m
+2026-03-18 17:18:59,735 - INFO - mk_dirs - [38;5;153m[+] expanded-ips.txt File successfully created[0m
+2026-03-18 17:18:59,758 - INFO - mk_dirs - [38;5;153m[+] subzy.txt File successfully created[0m
+2026-03-18 17:18:59,781 - INFO - mk_dirs - [38;5;153m[+] subjack.txt File successfully created[0m
+2026-03-18 17:18:59,804 - INFO - mk_dirs - [38;5;153m[+] open_redirect.txt File successfully created[0m
+2026-03-18 17:18:59,827 - INFO - mk_dirs - [38;5;153m[+] lfi-map.txt File successfully created[0m
+2026-03-18 17:18:59,850 - INFO - mk_dirs - [38;5;153m[+] openredirex.txt File successfully created[0m
+2026-03-18 17:18:59,873 - INFO - mk_dirs - [38;5;153m[+] aws_vuln_bucket.txt File successfully created[0m
+2026-03-18 17:18:59,896 - INFO - mk_dirs - [38;5;153m[+] clickjacking.txt File successfully created[0m
+2026-03-18 17:18:59,919 - INFO - mk_dirs - [38;5;153m[+] lfi-urls.txt File successfully created[0m
+2026-03-18 17:18:59,942 - INFO - mk_dirs - [38;5;153m[+] lfi-subs.txt File successfully created[0m
+2026-03-18 17:18:59,965 - INFO - mk_dirs - [38;5;153m[+] semgrep-findings.json File successfully created[0m
+2026-03-18 17:19:00,051 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:19:00,051 - INFO - main - Directories created successfully
+2026-03-18 17:19:00,051 - INFO - subfinder_subs - [32m(+) Subdomain enumeration[0m
+2026-03-18 17:19:02,434 - INFO - probe - [32m(+) Probing alive hosts[0m
+2026-03-18 17:19:05,249 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:19:05,250 - INFO - main - Subdomain collection completed
+2026-03-18 17:19:05,250 - INFO - validate_domains - [32m(+) Checking for DMARC, SPF records[0m
+2026-03-18 17:19:05,341 - INFO - validate_domains - [32m[+] DMARC and SPF check completed and results saved to output/vuln/missing-dmarc.json[0m
+2026-03-18 17:19:05,341 - INFO - validate_domains - 
+[38;5;153m========================================[0m
+
+2026-03-18 17:19:05,424 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:19:05,425 - INFO - main - DMARC domains validated
+2026-03-18 17:19:05,428 - INFO - get_cname - [32m(+) CNAME analysis for possible takeovers[0m
+2026-03-18 17:19:05,520 - INFO - test_takeover - [32m(+) Running subjack for takeover detection[0m
+2026-03-18 17:19:05,548 - DEBUG - test_takeover - subjack stderr: 2026/03/18 17:19:05 open /root/go/src/github.com/haccer/subjack/fingerprints.json: no such file or directory
+
+2026-03-18 17:19:05,548 - INFO - test_takeover - [32m(+) Running subzy for takeover detection[0m
+2026-03-18 17:19:05,877 - DEBUG - test_takeover - subzy stderr: 2026/03/18 17:19:05 Error reading subdomains: open output/hosts/subs.txt: no such file or directory
+
+2026-03-18 17:19:05,878 - INFO - auth0 - [32m(+) Testing for Auth0 self account signup[0m
+2026-03-18 17:19:10,506 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:19:10,507 - INFO - main - Subdomain takeover tests completed
+2026-03-18 17:19:10,507 - INFO - __init__ - [32mInitialising BucketFinder...[0m
+2026-03-18 17:19:10,510 - WARNING - buckets_cli - [31m(-) CNAMEs file missing or empty, skipping BucketFinder[0m
+2026-03-18 17:19:10,595 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:19:10,595 - INFO - collect_urls - [32m(+) Collecting all URLs[0m
+2026-03-18 17:19:13,445 - INFO - extract_js_files - [32m[+] Extracting JS files...[0m
+2026-03-18 17:19:13,461 - INFO - extract_js_files - [32m[+] Completed: JS files saved to output/urls/js-files.txt[0m
+2026-03-18 17:19:14,821 - INFO - extract_documents - [32m[+] Extracting documents and backup files...[0m
+2026-03-18 17:19:14,837 - INFO - extract_documents - [32m[+] Completed: Sensitive documents saved to output/urls/leaked-docs.txt[0m
+2026-03-18 17:19:14,838 - INFO - extract_js_data_with_mantra - [32m[+] Extracting data from JS files using Mantra...[0m
+2026-03-18 17:19:23,706 - INFO - extract_js_data_with_mantra - [32m[+] Completed: Mantra findings saved to output/urls/mantra_output.txt[0m
+2026-03-18 17:19:23,769 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:19:23,769 - INFO - main - URL scan completed
+2026-03-18 17:19:25,796 - DEBUG - _remove_empty_files - Removed empty file: output/hosts/asn.txt
+2026-03-18 17:19:25,799 - DEBUG - _remove_empty_files - Removed empty file: output/hosts/cnames.txt
+2026-03-18 17:19:25,802 - DEBUG - _remove_empty_files - Removed empty file: output/hosts/https-alive.txt
+2026-03-18 17:19:25,816 - DEBUG - _remove_empty_files - Removed empty file: output/urls/filtered-urls.txt
+2026-03-18 17:19:25,819 - DEBUG - _remove_empty_files - Removed empty file: output/urls/gf-lfi.txt
+2026-03-18 17:19:25,823 - DEBUG - _remove_empty_files - Removed empty file: output/urls/gf-sqli.txt
+2026-03-18 17:19:25,826 - DEBUG - _remove_empty_files - Removed empty file: output/urls/gf-ssrf.txt
+2026-03-18 17:19:25,829 - DEBUG - _remove_empty_files - Removed empty file: output/urls/gf-ssti.txt
+2026-03-18 17:19:25,833 - DEBUG - _remove_empty_files - Removed empty file: output/urls/gf-xss.txt
+2026-03-18 17:19:25,841 - DEBUG - _remove_empty_files - Removed empty file: output/urls/params.txt
+2026-03-18 17:19:25,848 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/alive-ips.txt
+2026-03-18 17:19:25,854 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/clickjacking.txt
+2026-03-18 17:19:25,858 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/expanded-ips.txt
+2026-03-18 17:19:25,862 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/ips.txt
+2026-03-18 17:19:25,865 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/js-findings.txt
+2026-03-18 17:19:25,868 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/lfi-map.txt
+2026-03-18 17:19:25,872 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/lfi-subs.txt
+2026-03-18 17:19:25,875 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/lfi-urls.txt
+2026-03-18 17:19:25,879 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/lfi.txt
+2026-03-18 17:19:25,882 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/mantra.txt
+2026-03-18 17:19:25,887 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/nuclei-dast-output.txt
+2026-03-18 17:19:25,890 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/nuclei-output.txt
+2026-03-18 17:19:25,893 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/openredirex.txt
+2026-03-18 17:19:25,896 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/open_redirect.txt
+2026-03-18 17:19:25,900 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/origin-ips.json
+2026-03-18 17:19:25,903 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/s3-buckets.json
+2026-03-18 17:19:25,906 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/semgrep-findings.json
+2026-03-18 17:19:25,910 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/sqli.txt
+2026-03-18 17:19:25,913 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/ssrf.txt
+2026-03-18 17:19:25,917 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/ssti.txt
+2026-03-18 17:19:25,920 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/subjack.txt
+2026-03-18 17:19:25,923 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/subzy.txt
+2026-03-18 17:19:25,927 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/takeovers.json
+2026-03-18 17:19:25,930 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/xss.txt
+2026-03-18 17:19:25,934 - DEBUG - _remove_empty_files - Removed empty file: output/vuln/xss_output.txt
+2026-03-18 17:19:25,948 - DEBUG - _remove_empty_dirs - Removed empty directory: output/auth0
+2026-03-18 17:19:25,954 - DEBUG - _remove_empty_dirs - Removed empty directory: output/js
+2026-03-18 17:19:25,958 - INFO - cleanup - [32m[+] Cleanup completed[0m
+2026-03-18 17:19:26,019 - WARNING - notify_telegram - Failed to send notification: 404 - {"ok":false,"error_code":404,"description":"Not Found"}
+2026-03-18 17:19:26,019 - INFO - main - Web Application Vulnerability Scan Completed
