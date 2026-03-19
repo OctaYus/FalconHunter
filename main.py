@@ -529,6 +529,15 @@ class BucketFinder:
             logger.warning(f"{color.RED}(-) {e}{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error in buckets_cli: {e}{color.END}")
+    def aws_extractor(self):
+        try:
+            urls_file = f"{self.output_file}/urls/all-urls.txt"
+            output_file = f"{self.output_file}/vuln/aws_vuln_bucket.txt"
+            aws_cmd = ["aws_extractor", "-u", urls_file, "-test-takeover", "-o", output_file]
+            subprocess.run(aws_cmd, check=True)
+        except Exception as e:
+            logger.exception(f"{color.RED}Error Occurred: {e}{color.END}")
+
 
 
 class UrlFinder:
@@ -1128,6 +1137,7 @@ def main():
         finder = UrlFinder(domains, output_file)
         finder.collect_urls()
         finder.extract_js_files()
+        bucket_finder.aws_extractor()
         finder.extract_documents()
         finder.extract_js_data_with_mantra()
         notifier.notify_telegram(

@@ -81,7 +81,7 @@ declare -A go_tools=(
   [dalfox]="github.com/hahwul/dalfox/v2@latest"
   [anew]="github.com/tomnomnom/anew@latest"
   [cnfinder]="github.com/OctaYus/cnfinder@latest"
-  
+  [aws_extractor]="github.com/OctaYus/aws_extractor@latest"
 )
 
 install_go_tools() {
@@ -104,11 +104,11 @@ install_go_tools() {
 }
 
 # 4. pipx tools install
+# NOTE: sstimap, ghauri were removed because they are not
+# available on PyPI/pipx anymore and caused hard errors.
 declare -A pipx_tools=(
   [waymore]="waymore"
   [trufflehog]="trufflehog"
-  [sstimap]="sstimap"
-  [ghauri]="ghauri"
 )
 
 install_pipx_tools() {
@@ -144,11 +144,16 @@ install_git_py_tools() {
         rm -rf "$repo"
         git clone --depth 1 "${git_py_tools[$repo]}" "$repo"
         cd "$repo"
-        # Always brute force --break-system-packages here (for requirements installs)
-        if python3 -m pip --help 2>&1 | grep -q break-system-packages; then
-            python3 -m pip install --break-system-packages --upgrade -r requirements.txt 2>&1 || true
+        # Install Python requirements if a requirements.txt is present
+        if [[ -f requirements.txt ]]; then
+            # Always brute force --break-system-packages here (for requirements installs)
+            if python3 -m pip --help 2>&1 | grep -q break-system-packages; then
+                python3 -m pip install --break-system-packages --upgrade -r requirements.txt 2>&1 || true
+            else
+                python3 -m pip install --user --upgrade -r requirements.txt 2>&1 || true
+            fi
         else
-            python3 -m pip install --user --upgrade -r requirements.txt 2>&1 || true
+            echo -e "${YELLOW}[!] No requirements.txt found for $repo; skipping Python deps install${NC}"
         fi
         main_py=$(find . -maxdepth 1 -iname "${repo}.py" | head -n1)
         if [[ -n "$main_py" ]]; then
@@ -162,19 +167,9 @@ install_git_py_tools() {
     popd >/dev/null
 }
 
-# 6. xsser via apt or pipx
+# 6. xsser – currently skipped (no longer in apt/pipx reliably)
 install_xsser() {
-    echo -e "${YELLOW}[+] Installing xsser...${NC}"
-    if command -v xsser &>/dev/null || [[ -f "/usr/local/bin/xsser" ]]; then
-        echo -e "${GREEN}[+] xsser is already installed${NC}"; return
-    fi
-    if ! sudo apt install -y xsser; then
-        echo -e "${YELLOW}[!] xsser not found in apt; trying pipx...${NC}"
-        pipx install xsser || { echo -e "${RED}[-] Failed to install xsser${NC}"; return; }
-        if [[ -x "$HOME/.local/bin/xsser" ]]; then
-            sudo ln -sf "$HOME/.local/bin/xsser" /usr/local/bin/xsser
-        fi
-    fi
+    echo -e "${YELLOW}[!] Skipping xsser installation – package not reliably available via apt or pipx.${NC}"
 }
 
 # 7. BadAuth0 – Auth0 unauthenticated account creation testing (Python)
