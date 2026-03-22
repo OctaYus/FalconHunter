@@ -74,6 +74,7 @@ venv.bak/
 # Logs & runtime
 ############################
 *.log
+logs*
 logs/
 tmp/
 *.pid
