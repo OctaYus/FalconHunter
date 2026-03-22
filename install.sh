@@ -82,6 +82,7 @@ declare -A go_tools=(
   [anew]="github.com/tomnomnom/anew@latest"
   [cnfinder]="github.com/OctaYus/cnfinder@latest"
   [aws_extractor]="github.com/OctaYus/aws_extractor@latest"
+  [katana]="github.com/projectdiscovery/katana/cmd/katana@latest"
 )
 
 install_go_tools() {
