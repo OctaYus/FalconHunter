@@ -83,6 +83,7 @@ declare -A go_tools=(
   [cnfinder]="github.com/OctaYus/cnfinder@latest"
   [aws_extractor]="github.com/OctaYus/aws_extractor@latest"
   [katana]="github.com/projectdiscovery/katana/cmd/katana@latest"
+  [ffuf]="github.com/ffuf/ffuf/v2@latest"
 )
 
 install_go_tools() {
@@ -207,12 +208,30 @@ install_gitleaks() {
     cd ..
 }
 
+WORDLISTS_DIR="${HOME}/Tools/wordlists"
+FFUF_WORDLIST="${WORDLISTS_DIR}/ffuf-common.txt"
+
+install_wordlists() {
+    echo -e "${YELLOW}[+] Downloading ffuf wordlist...${NC}"
+    mkdir -p "$WORDLISTS_DIR"
+    if [[ -f "$FFUF_WORDLIST" ]]; then
+        echo -e "${GREEN}[+] ffuf wordlist already exists at ${FFUF_WORDLIST}${NC}"
+        return
+    fi
+    if wget -q "http://www.ffuf.me/wordlist/common.txt" -O "$FFUF_WORDLIST"; then
+        echo -e "${GREEN}[+] ffuf wordlist saved to ${FFUF_WORDLIST}${NC}"
+    else
+        echo -e "${RED}[-] Failed to download ffuf wordlist${NC}"
+    fi
+}
+
 install_go_tools
 install_pipx_tools
 install_git_py_tools
 install_xsser
 install_badauth
 install_gitleaks
+install_wordlists
 
 echo -e "${GREEN}[+] All FalconHunter tools installed successfully!${NC}"
 echo -e "${YELLOW}[+] Please 'source ~/.bashrc' or restart your terminal for your PATH updates to take effect.${NC}"

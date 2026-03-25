@@ -10,7 +10,8 @@ logs.*
 log.*
 # C extensions
 *.so
-
+.claude
+test*
 # Distribution / packaging
 .Python
 build/

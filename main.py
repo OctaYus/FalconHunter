@@ -157,6 +157,7 @@ class MakeDirectories:
             vuln_files = [
                 "nuclei-output.txt",
                 "nuclei-dast-output.txt",
+                "ffuf-output.txt",
                 "xss.txt",
                 "lfi.txt",
                 "ssrf.txt",
@@ -621,7 +622,7 @@ class UrlFinder:
             logger.info(f"{color.GREEN}(+) Collecting all URLs{color.END}")
             depth_level = 5
             katana_cmd = ["katana", "-list", subdomains_file,
-                          "-d", depth_level, "-o", urls]
+                          "-d", str(depth_level), "-o", urls]
             subprocess.run(katana_cmd, check=True)
         except FileNotFoundError:
             logger.warning(
@@ -864,6 +865,108 @@ class Nuclei:
             logger.exception(f"{color.RED}(-) Error occurred: {e}{color.END}")
 
 
+class DirFuzzer:
+    """Class to perform directory fuzzing on alive hosts using ffuf"""
+
+    def __init__(self, output_file, wordlist, threads=40, timeout=10, match_codes="200,204,301,302,307,401,403"):
+        """
+        Initialize with output directory and ffuf options
+
+        Args:
+            output_file (str): Path to output directory
+            wordlist (str): Path to wordlist file
+            threads (int): Number of concurrent threads
+            timeout (int): Per-request timeout in seconds
+            match_codes (str): Comma-separated HTTP status codes to match
+        """
+        self.output_file = output_file
+        self.wordlist = wordlist
+        self.threads = threads
+        self.timeout = timeout
+        self.match_codes = match_codes
+
+    def fuzz(self):
+        """Run ffuf directory fuzzing against each alive host"""
+        hosts_file = f"{self.output_file}/hosts/alive-hosts.txt"
+        output = f"{self.output_file}/vuln/ffuf-output.txt"
+        try:
+            if not shutil.which("ffuf"):
+                logger.warning(
+                    f"{color.RED}(-) ffuf not found in PATH, skipping directory fuzzing{color.END}")
+                return
+            if not os.path.isfile(hosts_file) or os.path.getsize(hosts_file) == 0:
+                logger.warning(
+                    f"{color.RED}(-) No alive hosts file for ffuf, skipping{color.END}")
+                return
+            default_wordlist = os.path.expanduser("~/Tools/wordlists/ffuf-common.txt")
+            wordlist = os.path.expanduser(self.wordlist) if self.wordlist else default_wordlist
+            if not os.path.isfile(wordlist):
+                logger.warning(
+                    f"{color.RED}(-) Wordlist not found: {wordlist}, skipping directory fuzzing{color.END}")
+                return
+            self.wordlist = wordlist
+
+            logger.info(f"{color.GREEN}(+) Directory fuzzing with ffuf{color.END}")
+
+            with open(hosts_file, "r", encoding="utf-8", errors="replace") as f:
+                hosts = [line.strip() for line in f if line.strip()]
+
+            with open(output, "w", encoding="utf-8") as out_f:
+                for host in hosts:
+                    url = host.rstrip("/") + "/FUZZ"
+                    logger.info(f"{color.SKY_BLUE}(+) ffuf -> {host}{color.END}")
+                    tmp_path = f"{self.output_file}/vuln/.ffuf_tmp_{host.replace('://', '_').replace('/', '_')}.json"
+                    ffuf_cmd = [
+                        "ffuf",
+                        "-u", url,
+                        "-w", self.wordlist,
+                        "-t", str(self.threads),
+                        "-timeout", str(self.timeout),
+                        "-mc", self.match_codes,
+                        "-o", tmp_path,
+                        "-of", "json",
+                        "-s",
+                    ]
+                    try:
+                        p = subprocess.run(
+                            ffuf_cmd,
+                            capture_output=True,
+                            timeout=1800,
+                        )
+                        if p.returncode != 0 and p.stderr:
+                            logger.debug(
+                                f"ffuf stderr ({host}): {p.stderr.decode(errors='replace')}"
+                            )
+                        if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0:
+                            with open(tmp_path, "r", encoding="utf-8", errors="replace") as tf:
+                                data = json.load(tf)
+                            results = data.get("results", [])
+                            if results:
+                                out_f.write(f"# {host}\n")
+                                for r in results:
+                                    out_f.write(
+                                        f"{r['url']} [Status: {r['status']}, Size: {r['length']}, Words: {r['words']}, Lines: {r['lines']}]\n"
+                                    )
+                                out_f.write("\n")
+                    except subprocess.TimeoutExpired:
+                        logger.warning(
+                            f"{color.RED}(-) ffuf timed out for {host}{color.END}")
+                    finally:
+                        if os.path.isfile(tmp_path):
+                            os.unlink(tmp_path)
+
+            logger.info(
+                f"{color.GREEN}(+) Directory fuzzing completed, results saved to {output}{color.END}"
+            )
+            logger.info(f"\n{color.SKY_BLUE}{'=' * 40}{color.END}\n")
+
+        except FileNotFoundError:
+            logger.warning(
+                f"{color.RED}(-) ffuf not found in PATH{color.END}")
+        except Exception as e:
+            logger.exception(f"{color.RED}(-) Error during directory fuzzing: {e}{color.END}")
+
+
 class TelegramNotify:
     def __init__(self, telegram_token, telegram_chat_id, timeout=5, max_retries=3):
         """
@@ -1005,7 +1108,7 @@ def check_tools():
     """Check for required and optional CLI tools in PATH. Required: subfinder, httpx, waybackurls, anew. Optional: gau, gf, cnfinder, badauth, mantra, nuclei, subjack, subzy, s3scanner."""
     required = ["subfinder", "httpx", "waybackurls", "anew"]
     optional = ["gau", "gf", "cnfinder", "badauth",
-                "mantra", "nuclei", "subjack", "subzy", "s3scanner"]
+                "mantra", "nuclei", "subjack", "subzy", "s3scanner", "ffuf"]
     missing_required = [n for n in required if not shutil.which(n)]
     missing_optional = [n for n in optional if not shutil.which(n)]
     if missing_required:
@@ -1054,6 +1157,15 @@ def main():
     )
     parser.add_argument(
         "-e", "--email", help="Email to test for auth0 misconfigurations"
+    )
+    parser.add_argument(
+        "--ffuf",
+        action="store_true",
+        help="Run ffuf directory fuzzing on alive hosts (optional)",
+    )
+    parser.add_argument(
+        "--wordlist",
+        help="Path to wordlist for ffuf directory fuzzing",
     )
     parser.add_argument(
         "--cleanup-only",
@@ -1225,6 +1337,25 @@ def main():
             logger.exception("Failed during Nuclei scan")
             notifier.notify_telegram(
                 telegram_token, telegram_chat_id, "(-) Nuclei scan failed"
+            )
+
+    if args.ffuf:
+        try:
+            ffuf_config = config.get("ffuf", {})
+            wordlist = args.wordlist or ffuf_config.get("wordlist", "")
+            threads = ffuf_config.get("threads", 40)
+            timeout = ffuf_config.get("timeout", 10)
+            match_codes = ffuf_config.get("match_codes", "200,204,301,302,307,401,403")
+            dir_fuzzer = DirFuzzer(output_file, wordlist, threads, timeout, match_codes)
+            dir_fuzzer.fuzz()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) Directory fuzzing completed"
+            )
+            logger.info("Directory fuzzing completed")
+        except Exception as e:
+            logger.exception("Failed during directory fuzzing")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) Directory fuzzing failed"
             )
 
     try:
