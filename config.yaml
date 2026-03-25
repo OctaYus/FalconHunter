@@ -5,3 +5,9 @@ telegram:
 cleanup:
   remove_empty_files: true
   remove_empty_dirs: true
+
+ffuf:
+  wordlist: "~/Tools/wordlists/ffuf-common.txt"
+  threads: 40
+  timeout: 10
+  match_codes: "200,204,301,302,307,401,403"
