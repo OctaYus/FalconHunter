@@ -6,6 +6,7 @@ import subprocess
 import shutil
 import time
 from datetime import datetime as date
+from urllib.parse import urlparse
 import logging
 import logging_config
 import requests
@@ -103,7 +104,7 @@ class MakeDirectories:
             # Create the main output directory
             if not os.path.isdir(self.output_file):  # True
                 os.makedirs(self.output_file)
-            dirs_list = ["hosts", "urls", "js", "vuln"]
+            dirs_list = ["hosts", "urls", "vuln"]
 
             # Create subdirectories
             for d in dirs_list:
@@ -121,7 +122,6 @@ class MakeDirectories:
                 "httpx.txt",
                 "subs.txt",
                 "https-alive.txt",
-                "asn.txt",
                 "cnames.txt",
             ]
             for f in hosts_files:
@@ -135,7 +135,6 @@ class MakeDirectories:
             # Create files in the 'urls' directory
             urls_files = [
                 "all-urls.txt",
-                "filtered-urls.txt",
                 "js-files.txt",
                 "leaked-docs.txt",
                 "mantra_output.txt",
@@ -165,24 +164,17 @@ class MakeDirectories:
                 "ssti.txt",
                 "js-findings.txt",
                 "missing-dmarc.json",
-                "origin-ips.json",
-                "s3-buckets.json",
-                "ips.txt",
-                "alive-ips.txt",
-                "xss_output.txt",
                 "takeovers.json",
-                "mantra.txt",
-                "expanded-ips.txt",
                 "subzy.txt",
                 "subjack.txt",
-                "open_redirect.txt",
-                "lfi-map.txt",
-                "openredirex.txt",
                 "aws_vuln_bucket.txt",
-                "clickjacking.txt",
                 "lfi-urls.txt",
                 "lfi-subs.txt",
-                "semgrep-findings.json",
+                "cors.txt",
+                "crlf.txt",
+                "403-bypass.txt",
+                "api-endpoints.txt",
+                "dirsearch-output.txt",
             ]
             for v in vuln_files:
                 open(os.path.join(f"{self.output_file}/vuln/", v), "w").close()
@@ -261,6 +253,15 @@ class SubdomainsCollector:
             if new_lines:
                 with open(alive_output, "a", encoding="utf-8") as outfile:
                     outfile.write("\n".join(new_lines) + "\n")
+
+            # Populate https-alive.txt from alive-hosts.txt
+            https_output = f"{self.output_file}/hosts/https-alive.txt"
+            if os.path.isfile(alive_output):
+                with open(alive_output, "r", encoding="utf-8", errors="replace") as af:
+                    https_lines = [l.strip() for l in af if l.strip().startswith("https://")]
+                if https_lines:
+                    with open(https_output, "w", encoding="utf-8") as hf:
+                        hf.write("\n".join(https_lines) + "\n")
 
         except FileNotFoundError:
             logger.warning(
@@ -462,6 +463,49 @@ class SubdomainTakeOver:
             logger.warning(f"{color.RED}(-) subzy timed out{color.END}")
         except Exception as e:
             logger.debug(f"subzy failed: {e}")
+
+        # Aggregate subjack + subzy findings → takeovers.json
+        takeovers = []
+        try:
+            if os.path.isfile(subjack_out):
+                with open(subjack_out, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if "[Vulnerable]" in line or "[vulnerable]" in line.lower():
+                            # subjack format: [Vulnerable] subdomain: service
+                            parts = line.split("]", 1)[-1].strip().split(":", 1)
+                            subdomain = parts[0].strip() if parts else line
+                            service = parts[1].strip() if len(parts) > 1 else "unknown"
+                            takeovers.append({"subdomain": subdomain, "service": service, "tool": "subjack"})
+                            logger.info(f"{color.RED}[!] Takeover: {subdomain} ({service}) via subjack{color.END}")
+        except Exception as e:
+            logger.debug(f"Error parsing subjack output: {e}")
+
+        try:
+            if os.path.isfile(subzy_out):
+                with open(subzy_out, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if "VULNERABLE" in line.upper():
+                            # subzy format: [VULNERABLE] subdomain - service
+                            parts = line.split("]", 1)[-1].strip().split(" - ", 1)
+                            subdomain = parts[0].strip() if parts else line
+                            service = parts[1].strip() if len(parts) > 1 else "unknown"
+                            takeovers.append({"subdomain": subdomain, "service": service, "tool": "subzy"})
+                            logger.info(f"{color.RED}[!] Takeover: {subdomain} ({service}) via subzy{color.END}")
+        except Exception as e:
+            logger.debug(f"Error parsing subzy output: {e}")
+
+        takeovers_json = f"{self.output_file}/vuln/takeovers.json"
+        try:
+            with open(takeovers_json, "w", encoding="utf-8") as jf:
+                json.dump(takeovers, jf, indent=4)
+            if takeovers:
+                logger.info(f"{color.RED}[!] {len(takeovers)} subdomain takeover(s) found → {takeovers_json}{color.END}")
+            else:
+                logger.info(f"{color.GREEN}(+) No subdomain takeovers found{color.END}")
+        except Exception as e:
+            logger.debug(f"Error writing takeovers.json: {e}")
 
     def auth0(self):
         """
@@ -728,6 +772,52 @@ class UrlFinder:
                 except Exception as e:
                     logger.warning(f"gf {pattern} failed: {e}")
 
+            # Alias lfi-urls.txt from gf-lfi.txt; extract domains into lfi-subs.txt
+            gf_lfi = os.path.join(gf_output_dir, "gf-lfi.txt")
+            lfi_urls_out = f"{self.output_file}/vuln/lfi-urls.txt"
+            lfi_subs_out = f"{self.output_file}/vuln/lfi-subs.txt"
+            try:
+                if os.path.isfile(gf_lfi) and os.path.getsize(gf_lfi) > 0:
+                    shutil.copy2(gf_lfi, lfi_urls_out)
+                    seen_subs = set()
+                    with open(gf_lfi, "r", encoding="utf-8", errors="replace") as lf:
+                        with open(lfi_subs_out, "w", encoding="utf-8") as sf:
+                            for line in lf:
+                                url = line.strip()
+                                if not url:
+                                    continue
+                                parsed = urlparse(url)
+                                host = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else url
+                                if host not in seen_subs:
+                                    seen_subs.add(host)
+                                    sf.write(host + "\n")
+            except Exception as e:
+                logger.debug(f"lfi alias failed: {e}")
+
+            # paramspider: discover parameters from alive hosts
+            try:
+                if os.path.isfile(subdomains_file) and os.path.getsize(subdomains_file) > 0:
+                    params_out = f"{self.output_file}/urls/params.txt"
+                    logger.info(f"{color.GREEN}(+) Running paramspider for parameter discovery{color.END}")
+                    p_ps = subprocess.run(
+                        ["paramspider", "-l", subdomains_file],
+                        capture_output=True,
+                        timeout=600,
+                    )
+                    if p_ps.stdout and p_ps.stdout.strip():
+                        subprocess.run(
+                            ["anew", params_out],
+                            input=p_ps.stdout,
+                            capture_output=True,
+                            timeout=60,
+                        )
+            except FileNotFoundError:
+                logger.warning(f"{color.RED}(-) paramspider not found in PATH (optional){color.END}")
+            except subprocess.TimeoutExpired:
+                logger.warning("paramspider timed out, skipping")
+            except Exception as e:
+                logger.debug(f"paramspider failed: {e}")
+
         except Exception as e:
             logger.exception(
                 f"{color.RED}Error occurred during URL collection: {e}{color.END}"
@@ -967,6 +1057,282 @@ class DirFuzzer:
             logger.exception(f"{color.RED}(-) Error during directory fuzzing: {e}{color.END}")
 
 
+class CorsScanner:
+    """Class to scan for CORS misconfigurations on alive hosts"""
+
+    def __init__(self, output_file):
+        self.output_file = output_file
+
+    def scan(self):
+        """Run CORS misconfiguration scan using corsy"""
+        hosts_file = f"{self.output_file}/hosts/alive-hosts.txt"
+        output = f"{self.output_file}/vuln/cors.txt"
+        try:
+            if not os.path.isfile(hosts_file) or os.path.getsize(hosts_file) == 0:
+                logger.warning(
+                    f"{color.RED}(-) No alive hosts for CORS scan, skipping{color.END}")
+                return
+            if not shutil.which("corsy"):
+                logger.warning(
+                    f"{color.RED}(-) corsy not found in PATH, skipping CORS scan{color.END}")
+                return
+            logger.info(f"{color.GREEN}(+) Running CORS misconfiguration scan{color.END}")
+            p = subprocess.run(
+                ["corsy", "-i", hosts_file, "-o", output],
+                capture_output=True,
+                timeout=1800,
+            )
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"corsy stderr: {p.stderr.decode(errors='replace')}")
+            logger.info(
+                f"{color.GREEN}(+) CORS scan completed, results saved to {output}{color.END}")
+            logger.info(f"\n{color.SKY_BLUE}{'=' * 40}{color.END}\n")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) corsy not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) CORS scan timed out{color.END}")
+        except Exception as e:
+            logger.exception(f"{color.RED}Error during CORS scan: {e}{color.END}")
+
+
+class CrlfScanner:
+    """Class to scan for CRLF injection vulnerabilities"""
+
+    def __init__(self, output_file):
+        self.output_file = output_file
+
+    def scan(self):
+        """Run CRLF injection scan using crlfuzz"""
+        urls_file = f"{self.output_file}/urls/all-urls.txt"
+        output = f"{self.output_file}/vuln/crlf.txt"
+        try:
+            if not os.path.isfile(urls_file) or os.path.getsize(urls_file) == 0:
+                logger.warning(
+                    f"{color.RED}(-) No URLs for CRLF scan, skipping{color.END}")
+                return
+            if not shutil.which("crlfuzz"):
+                logger.warning(
+                    f"{color.RED}(-) crlfuzz not found in PATH, skipping CRLF scan{color.END}")
+                return
+            logger.info(f"{color.GREEN}(+) Running CRLF injection scan{color.END}")
+            p = subprocess.run(
+                ["crlfuzz", "-l", urls_file, "-o", output],
+                capture_output=True,
+                timeout=1800,
+            )
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"crlfuzz stderr: {p.stderr.decode(errors='replace')}")
+            logger.info(
+                f"{color.GREEN}(+) CRLF scan completed, results saved to {output}{color.END}")
+            logger.info(f"\n{color.SKY_BLUE}{'=' * 40}{color.END}\n")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) crlfuzz not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) CRLF scan timed out{color.END}")
+        except Exception as e:
+            logger.exception(f"{color.RED}Error during CRLF scan: {e}{color.END}")
+
+
+class DirectoryFuzzer:
+    """Class to perform directory and path discovery using dirsearch"""
+
+    def __init__(self, output_file, wordlist="", threads=25,
+                 extensions="php,html,js,txt,json,xml,bak,zip"):
+        self.output_file = output_file
+        self.wordlist = wordlist
+        self.threads = threads
+        self.extensions = extensions
+
+    def fuzz(self):
+        """Run dirsearch on alive hosts"""
+        hosts_file = f"{self.output_file}/hosts/alive-hosts.txt"
+        output = f"{self.output_file}/vuln/dirsearch-output.txt"
+        try:
+            if not shutil.which("dirsearch"):
+                logger.warning(
+                    f"{color.RED}(-) dirsearch not found in PATH, skipping{color.END}")
+                return
+            if not os.path.isfile(hosts_file) or os.path.getsize(hosts_file) == 0:
+                logger.warning(
+                    f"{color.RED}(-) No alive hosts for dirsearch, skipping{color.END}")
+                return
+            logger.info(f"{color.GREEN}(+) Directory discovery with dirsearch{color.END}")
+            cmd = [
+                "dirsearch",
+                "-l", hosts_file,
+                "-t", str(self.threads),
+                "-e", self.extensions,
+                "--format", "plain",
+                "-o", output,
+            ]
+            if self.wordlist and os.path.isfile(os.path.expanduser(self.wordlist)):
+                cmd += ["-w", os.path.expanduser(self.wordlist)]
+            p = subprocess.run(cmd, capture_output=True, timeout=3600)
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"dirsearch stderr: {p.stderr.decode(errors='replace')}")
+            logger.info(
+                f"{color.GREEN}(+) dirsearch completed, results saved to {output}{color.END}")
+            logger.info(f"\n{color.SKY_BLUE}{'=' * 40}{color.END}\n")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) dirsearch not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) dirsearch timed out{color.END}")
+        except Exception as e:
+            logger.exception(f"{color.RED}Error during dirsearch: {e}{color.END}")
+
+
+class FourOhThreeBypasser:
+    """Class to attempt bypass of 403 Forbidden responses"""
+
+    def __init__(self, output_file):
+        self.output_file = output_file
+
+    def bypass(self):
+        """Run 403 bypass attempts using bypass-403"""
+        hosts_file = f"{self.output_file}/hosts/alive-hosts.txt"
+        output = f"{self.output_file}/vuln/403-bypass.txt"
+        try:
+            if not shutil.which("bypass-403"):
+                logger.warning(
+                    f"{color.RED}(-) bypass-403 not found in PATH, skipping 403 bypass{color.END}")
+                return
+            if not os.path.isfile(hosts_file) or os.path.getsize(hosts_file) == 0:
+                logger.warning(
+                    f"{color.RED}(-) No alive hosts for 403 bypass, skipping{color.END}")
+                return
+            logger.info(f"{color.GREEN}(+) Running 403 bypass checks{color.END}")
+            with open(hosts_file, "r", encoding="utf-8", errors="replace") as f:
+                hosts = [line.strip() for line in f if line.strip()]
+            results = []
+            for host in hosts:
+                logger.info(f"{color.SKY_BLUE}(+) bypass-403 -> {host}{color.END}")
+                try:
+                    p = subprocess.run(
+                        ["bypass-403", "-u", host],
+                        capture_output=True,
+                        timeout=120,
+                    )
+                    if p.stdout and p.stdout.strip():
+                        results.append(
+                            f"# {host}\n{p.stdout.decode(errors='replace')}\n")
+                except subprocess.TimeoutExpired:
+                    logger.debug(f"bypass-403 timed out for {host}")
+            if results:
+                with open(output, "w", encoding="utf-8") as out_f:
+                    out_f.writelines(results)
+            logger.info(
+                f"{color.GREEN}(+) 403 bypass completed, results saved to {output}{color.END}")
+            logger.info(f"\n{color.SKY_BLUE}{'=' * 40}{color.END}\n")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) bypass-403 not found in PATH{color.END}")
+        except Exception as e:
+            logger.exception(f"{color.RED}Error during 403 bypass: {e}{color.END}")
+
+
+class ApiDiscovery:
+    """Class to discover API endpoints on alive hosts using kiterunner or ffuf"""
+
+    def __init__(self, output_file, wordlist=""):
+        self.output_file = output_file
+        self.wordlist = wordlist
+
+    def discover(self):
+        """Discover API endpoints; prefers kiterunner (kr), falls back to ffuf"""
+        hosts_file = f"{self.output_file}/hosts/alive-hosts.txt"
+        output = f"{self.output_file}/vuln/api-endpoints.txt"
+        try:
+            if not os.path.isfile(hosts_file) or os.path.getsize(hosts_file) == 0:
+                logger.warning(
+                    f"{color.RED}(-) No alive hosts for API discovery, skipping{color.END}")
+                return
+            if shutil.which("kr"):
+                self._discover_with_kr(hosts_file, output)
+            elif shutil.which("ffuf"):
+                self._discover_with_ffuf(hosts_file, output)
+            else:
+                logger.warning(
+                    f"{color.RED}(-) Neither kr nor ffuf found in PATH, skipping API discovery{color.END}")
+                return
+            logger.info(f"\n{color.SKY_BLUE}{'=' * 40}{color.END}\n")
+        except Exception as e:
+            logger.exception(f"{color.RED}Error during API discovery: {e}{color.END}")
+
+    def _discover_with_kr(self, hosts_file, output):
+        """API discovery via kiterunner"""
+        logger.info(f"{color.GREEN}(+) Running API discovery with kiterunner{color.END}")
+        routes = os.path.expanduser(self.wordlist) if self.wordlist and os.path.isfile(
+            os.path.expanduser(self.wordlist)) else None
+        cmd = ["kr", "scan", hosts_file]
+        if routes:
+            cmd += ["-w", routes]
+        else:
+            cmd += ["-A=apiroutes-210228:20000"]
+        try:
+            p = subprocess.run(cmd, capture_output=True, timeout=1800)
+            if p.stdout and p.stdout.strip():
+                with open(output, "wb") as f:
+                    f.write(p.stdout)
+            if p.returncode != 0 and p.stderr:
+                logger.debug(f"kr stderr: {p.stderr.decode(errors='replace')}")
+            logger.info(
+                f"{color.GREEN}(+) API discovery completed, results saved to {output}{color.END}")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) kr not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) kiterunner timed out{color.END}")
+
+    def _discover_with_ffuf(self, hosts_file, output):
+        """API discovery fallback via ffuf"""
+        logger.info(f"{color.GREEN}(+) Running API discovery with ffuf{color.END}")
+        api_wordlist = os.path.expanduser(self.wordlist) if self.wordlist else os.path.expanduser(
+            "~/Tools/wordlists/api-endpoints.txt")
+        if not os.path.isfile(api_wordlist):
+            logger.warning(
+                f"{color.RED}(-) No API wordlist found for ffuf, skipping API discovery{color.END}")
+            return
+        try:
+            with open(hosts_file, "r", encoding="utf-8", errors="replace") as f:
+                hosts = [line.strip() for line in f if line.strip()]
+            with open(output, "w", encoding="utf-8") as out_f:
+                for host in hosts:
+                    url = host.rstrip("/") + "/FUZZ"
+                    tmp_path = (
+                        f"{self.output_file}/vuln/.api_ffuf_tmp_"
+                        f"{host.replace('://', '_').replace('/', '_')}.json"
+                    )
+                    try:
+                        p = subprocess.run(
+                            [
+                                "ffuf", "-u", url, "-w", api_wordlist,
+                                "-mc", "200,201,204,301,302,401,403,405",
+                                "-o", tmp_path, "-of", "json", "-s",
+                            ],
+                            capture_output=True,
+                            timeout=600,
+                        )
+                        if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0:
+                            with open(tmp_path, "r", encoding="utf-8", errors="replace") as tf:
+                                data = json.load(tf)
+                            hits = data.get("results", [])
+                            if hits:
+                                out_f.write(f"# {host}\n")
+                                for r in hits:
+                                    out_f.write(
+                                        f"{r['url']} [Status: {r['status']}, Size: {r['length']}]\n")
+                                out_f.write("\n")
+                    except subprocess.TimeoutExpired:
+                        logger.debug(f"ffuf api scan timed out for {host}")
+                    finally:
+                        if os.path.isfile(tmp_path):
+                            os.unlink(tmp_path)
+            logger.info(
+                f"{color.GREEN}(+) API discovery completed, results saved to {output}{color.END}")
+        except FileNotFoundError:
+            logger.warning(f"{color.RED}(-) ffuf not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) ffuf API scan timed out{color.END}")
+
+
 class TelegramNotify:
     def __init__(self, telegram_token, telegram_chat_id, timeout=5, max_retries=3):
         """
@@ -1108,7 +1474,8 @@ def check_tools():
     """Check for required and optional CLI tools in PATH. Required: subfinder, httpx, waybackurls, anew. Optional: gau, gf, cnfinder, badauth, mantra, nuclei, subjack, subzy, s3scanner."""
     required = ["subfinder", "httpx", "waybackurls", "anew"]
     optional = ["gau", "gf", "cnfinder", "badauth",
-                "mantra", "nuclei", "subjack", "subzy", "s3scanner", "ffuf"]
+                "mantra", "nuclei", "subjack", "subzy", "s3scanner", "ffuf",
+                "corsy", "crlfuzz", "dirsearch", "bypass-403", "kr"]
     missing_required = [n for n in required if not shutil.which(n)]
     missing_optional = [n for n in optional if not shutil.which(n)]
     if missing_required:
@@ -1166,6 +1533,40 @@ def main():
     parser.add_argument(
         "--wordlist",
         help="Path to wordlist for ffuf directory fuzzing",
+    )
+    parser.add_argument(
+        "--cors",
+        action="store_true",
+        help="Run CORS misconfiguration scan (requires corsy)",
+    )
+    parser.add_argument(
+        "--crlf",
+        action="store_true",
+        help="Run CRLF injection scan (requires crlfuzz)",
+    )
+    parser.add_argument(
+        "--dirsearch",
+        action="store_true",
+        help="Run directory discovery with dirsearch (optional)",
+    )
+    parser.add_argument(
+        "--dirsearch-wordlist",
+        help="Path to wordlist for dirsearch",
+    )
+    parser.add_argument(
+        "--403",
+        dest="bypass_403",
+        action="store_true",
+        help="Run 403 bypass checks (requires bypass-403)",
+    )
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Run API endpoint discovery (requires kr or ffuf)",
+    )
+    parser.add_argument(
+        "--api-wordlist",
+        help="Path to wordlist for API discovery",
     )
     parser.add_argument(
         "--cleanup-only",
@@ -1285,10 +1686,20 @@ def main():
             domains, output_file, args.email or "")
         subdomains_takeover.get_cname()
         subdomains_takeover.test_takeover()
-        subdomains_takeover.auth0()
-        notifier.notify_telegram(
-            telegram_token, telegram_chat_id, "(+) Subdomain takeover tests completed"
+        # Notify with finding count from takeovers.json
+        takeovers_json_path = f"{output_file}/vuln/takeovers.json"
+        takeover_count = 0
+        try:
+            if os.path.isfile(takeovers_json_path):
+                with open(takeovers_json_path) as _tf:
+                    takeover_count = len(json.load(_tf))
+        except Exception:
+            pass
+        takeover_msg = (
+            f"[!] {takeover_count} subdomain takeover(s) found!"
+            if takeover_count else "(+) Subdomain takeover tests completed — no takeovers found"
         )
+        notifier.notify_telegram(telegram_token, telegram_chat_id, takeover_msg)
         logger.info("Subdomain takeover tests completed")
     except Exception as e:
         logger.exception("Failed during subdomain takeover tests")
@@ -1299,6 +1710,7 @@ def main():
     try:
         # Execute BucketFinder and notify
         bucket_finder = BucketFinder(domains, output_file)
+        subdomains_takeover.auth0()
         bucket_finder.buckets_cli()
         notifier.notify_telegram(
             telegram_token, telegram_chat_id, "(+) BucketFinder scan completed"
@@ -1356,6 +1768,81 @@ def main():
             logger.exception("Failed during directory fuzzing")
             notifier.notify_telegram(
                 telegram_token, telegram_chat_id, "(-) Directory fuzzing failed"
+            )
+
+    if args.cors:
+        try:
+            cors_scanner = CorsScanner(output_file)
+            cors_scanner.scan()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) CORS scan completed"
+            )
+            logger.info("CORS scan completed")
+        except Exception as e:
+            logger.exception("Failed during CORS scan")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) CORS scan failed"
+            )
+
+    if args.crlf:
+        try:
+            crlf_scanner = CrlfScanner(output_file)
+            crlf_scanner.scan()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) CRLF scan completed"
+            )
+            logger.info("CRLF scan completed")
+        except Exception as e:
+            logger.exception("Failed during CRLF scan")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) CRLF scan failed"
+            )
+
+    if args.dirsearch:
+        try:
+            dirsearch_config = config.get("dirsearch", {})
+            ds_wordlist = args.dirsearch_wordlist or dirsearch_config.get("wordlist", "")
+            ds_threads = dirsearch_config.get("threads", 25)
+            ds_extensions = dirsearch_config.get("extensions", "php,html,js,txt,json,xml,bak,zip")
+            dir_fuzzer = DirectoryFuzzer(output_file, ds_wordlist, ds_threads, ds_extensions)
+            dir_fuzzer.fuzz()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) dirsearch completed"
+            )
+            logger.info("dirsearch completed")
+        except Exception as e:
+            logger.exception("Failed during dirsearch")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) dirsearch failed"
+            )
+
+    if args.bypass_403:
+        try:
+            bypasser = FourOhThreeBypasser(output_file)
+            bypasser.bypass()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) 403 bypass completed"
+            )
+            logger.info("403 bypass completed")
+        except Exception as e:
+            logger.exception("Failed during 403 bypass")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) 403 bypass failed"
+            )
+
+    if args.api:
+        try:
+            api_wordlist = args.api_wordlist or config.get("api_discovery", {}).get("wordlist", "")
+            api_discovery = ApiDiscovery(output_file, api_wordlist)
+            api_discovery.discover()
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(+) API discovery completed"
+            )
+            logger.info("API discovery completed")
+        except Exception as e:
+            logger.exception("Failed during API discovery")
+            notifier.notify_telegram(
+                telegram_token, telegram_chat_id, "(-) API discovery failed"
             )
 
     try:
