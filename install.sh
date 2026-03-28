@@ -84,6 +84,8 @@ declare -A go_tools=(
   [aws_extractor]="github.com/OctaYus/aws_extractor@latest"
   [katana]="github.com/projectdiscovery/katana/cmd/katana@latest"
   [ffuf]="github.com/ffuf/ffuf/v2@latest"
+  [crlfuzz]="github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest"
+  [kr]="github.com/assetnote/kiterunner/cmd/kr@latest"
 )
 
 install_go_tools() {
@@ -111,6 +113,8 @@ install_go_tools() {
 declare -A pipx_tools=(
   [waymore]="waymore"
   [trufflehog]="trufflehog"
+  [s3scanner]="s3scanner"
+  [dirsearch]="dirsearch"
 )
 
 install_pipx_tools() {
@@ -133,6 +137,7 @@ declare -A git_py_tools=(
   [paramspider]="https://github.com/devanshbatham/ParamSpider"
   [openredirex]="https://github.com/devanshbatham/OpenRedireX"
   [secretfinder]="https://github.com/m4ll0k/SecretFinder.git"
+  [corsy]="https://github.com/s0md3v/Corsy"
 )
 
 install_git_py_tools() {
@@ -195,7 +200,21 @@ install_badauth() {
     echo -e "${GREEN}[+] badauth → /usr/local/bin (BadAuth0)${NC}"
 }
 
-# 8. Gitleaks (Go program with make)
+# 8. bypass-403 (bash script by iamj0ker)
+install_bypass403() {
+    echo -e "${YELLOW}[+] Installing bypass-403...${NC}"
+    if command -v bypass-403 &>/dev/null || [[ -f /usr/local/bin/bypass-403 ]]; then
+        echo -e "${GREEN}[+] bypass-403 is already installed${NC}"
+        return
+    fi
+    rm -rf "$TOOLS_DIR/bypass-403"
+    git clone --depth 1 https://github.com/iamj0ker/bypass-403.git "$TOOLS_DIR/bypass-403"
+    chmod +x "$TOOLS_DIR/bypass-403/bypass-403.sh"
+    sudo ln -sf "$TOOLS_DIR/bypass-403/bypass-403.sh" /usr/local/bin/bypass-403
+    echo -e "${GREEN}[+] bypass-403 → /usr/local/bin${NC}"
+}
+
+# 9. Gitleaks (Go program with make)
 install_gitleaks() {
     if command -v gitleaks &>/dev/null || [[ -f "/usr/local/bin/gitleaks" ]]; then
         echo -e "${GREEN}[+] gitleaks is already installed${NC}"
@@ -230,6 +249,7 @@ install_pipx_tools
 install_git_py_tools
 install_xsser
 install_badauth
+install_bypass403
 install_gitleaks
 install_wordlists
 
