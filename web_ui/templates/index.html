@@ -1,0 +1,2783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FalconHunter — Web UI</title>
+<!-- highlight.js -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+/* ══════════════════════════════════════════
+   CSS VARIABLES — dark (default) & light
+══════════════════════════════════════════ */
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --border:    #30363d;
+  --green:     #3fb950;
+  --green-dim: #238636;
+  --red:       #f85149;
+  --yellow:    #d29922;
+  --blue:      #58a6ff;
+  --sky:       #79c0ff;
+  --text:      #c9d1d9;
+  --text-dim:  #6e7681;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  --panel-left-width: 360px;
+  --glass-bg:  rgba(22,27,34,0.82);
+  --glass-blur: blur(12px);
+  --glow-green: 0 0 8px rgba(63,185,80,0.4);
+  --glow-blue:  0 0 8px rgba(88,166,255,0.4);
+  --glow-red:   0 0 8px rgba(248,81,73,0.4);
+}
+
+body.light-theme {
+  --bg:        #f0f2f5;
+  --surface:   #ffffff;
+  --border:    #d0d7de;
+  --green:     #1a7f37;
+  --green-dim: #2da44e;
+  --red:       #cf222e;
+  --yellow:    #9a6700;
+  --blue:      #0969da;
+  --sky:       #0550ae;
+  --text:      #1f2328;
+  --text-dim:  #636c76;
+  --glass-bg:  rgba(255,255,255,0.85);
+  --glow-green: 0 0 8px rgba(26,127,55,0.3);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+@keyframes fadeInPage { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes scanline {
+  0%   { transform: translateY(-100%); opacity: 0.04; }
+  100% { transform: translateY(100vh); opacity: 0.04; }
+}
+
+body {
+  background: var(--bg);
+  background-image: radial-gradient(ellipse at 20% 0%, rgba(63,185,80,0.04) 0%, transparent 60%),
+                    radial-gradient(ellipse at 80% 100%, rgba(88,166,255,0.04) 0%, transparent 60%);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeInPage 0.4s ease both;
+}
+body.light-theme {
+  background-image: radial-gradient(ellipse at 20% 0%, rgba(26,127,55,0.05) 0%, transparent 60%),
+                    radial-gradient(ellipse at 80% 100%, rgba(9,105,218,0.05) 0%, transparent 60%);
+}
+
+/* Subtle scanline effect overlay */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, rgba(63,185,80,0.15) 50%, transparent 100%);
+  animation: scanline 8s linear infinite;
+  pointer-events: none;
+  z-index: 9999;
+}
+body.light-theme::before { display: none; }
+
+/* ── Header ── */
+header {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+header pre { color: var(--green); font-size: 9px; line-height: 1.2; white-space: pre; }
+.header-meta { display: flex; flex-direction: column; gap: 3px; }
+.header-meta span { color: var(--text-dim); font-size: 11px; }
+.header-meta a { color: var(--sky); text-decoration: none; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+.badge-green  { background: #1a3a1e; color: var(--green);  border: 1px solid var(--green-dim); }
+.badge-red    { background: #3a1a1a; color: var(--red);    border: 1px solid #6b2020; }
+.badge-yellow { background: #3a2e0a; color: var(--yellow); border: 1px solid #6b5510; }
+body.light-theme .badge-green  { background: #d3f1df; }
+body.light-theme .badge-red    { background: #ffdce0; }
+body.light-theme .badge-yellow { background: #fff5cc; }
+.header-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+/* ── System stats widget ── */
+.sys-stats {
+  display: flex; gap: 10px; align-items: center; font-size: 10px;
+  color: var(--text-dim); padding: 0 8px; border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border); user-select: none;
+}
+.sys-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.sys-stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+.sys-stat-val { font-size: 11px; font-weight: bold; color: var(--sky); font-variant-numeric: tabular-nums; transition: color 0.3s; }
+.sys-stat-val.warn { color: var(--yellow); }
+.sys-stat-val.critical { color: var(--red); }
+.sys-stat-mini-bar {
+  width: 36px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 1px;
+}
+.sys-stat-mini-fill {
+  height: 100%; background: var(--sky); border-radius: 2px; transition: width 0.6s ease, background 0.3s;
+}
+.uptime-stat { font-size: 10px; color: var(--text-dim); }
+
+/* ── Main layout ── */
+.main { display: flex; flex: 1; overflow: hidden; position: relative; }
+
+/* ── Left panel ── */
+.panel-left {
+  width: var(--panel-left-width);
+  min-width: 200px;
+  flex-shrink: 0;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.25s cubic-bezier(0.4,0,0.2,1);
+  position: relative;
+}
+.panel-left.collapsed { width: 0 !important; min-width: 0; }
+.panel-left.collapsed > * { display: none; }
+
+/* drag handle */
+.drag-handle {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.15s;
+}
+.drag-handle:hover { background: var(--green); opacity: 0.5; }
+
+/* tabs */
+.tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; }
+.tab {
+  flex-shrink: 0;
+  padding: 8px 6px; text-align: center; cursor: pointer;
+  color: var(--text-dim); border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s; font-size: 10px; user-select: none;
+  white-space: nowrap;
+}
+.tab.active { color: var(--green); border-bottom-color: var(--green); }
+.tab:hover:not(.active) { color: var(--text); }
+
+.tab-content { display: none; flex: 1; overflow-y: auto; padding: 12px; }
+.tab-content.active { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── Form elements ── */
+label { display: block; color: var(--text-dim); font-size: 11px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+textarea, input[type="text"], input[type="number"], input[type="datetime-local"] {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-family: var(--font-mono);
+  font-size: 12px; padding: 7px 10px; resize: vertical; outline: none;
+  transition: border-color 0.2s;
+}
+textarea:focus, input[type="text"]:focus, input[type="number"]:focus, input[type="datetime-local"]:focus {
+  border-color: var(--green);
+}
+.form-group { display: flex; flex-direction: column; }
+.checkbox-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.checkbox-item {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; user-select: none;
+}
+.checkbox-item:hover { border-color: var(--green); background: rgba(63,185,80,0.07); box-shadow: 0 0 6px rgba(63,185,80,0.15); }
+.checkbox-item:has(input:checked) { border-color: var(--green-dim); background: rgba(63,185,80,0.1); }
+.checkbox-item input { accent-color: var(--green); cursor: pointer; }
+.checkbox-item span { font-size: 12px; }
+.section-title { color: var(--sky); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; padding: 4px 0; border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+
+/* ── Buttons ── */
+.btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-family: var(--font-mono); font-size: 12px; font-weight: bold; transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s; outline: none; position: relative; overflow: hidden; }
+.btn::after { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0); transition: background 0.15s; border-radius: inherit; }
+.btn:hover::after { background: rgba(255,255,255,0.05); }
+.btn:active { transform: scale(0.96); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-primary  { background: var(--green-dim); color: #fff; border: 1px solid var(--green); }
+.btn-primary:hover:not(:disabled) { box-shadow: var(--glow-green); opacity: 0.9; }
+.btn-danger   { background: #6b2020; color: #fff; border: 1px solid var(--red); }
+.btn-danger:hover:not(:disabled) { background: #8a2929; box-shadow: var(--glow-red); }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover:not(:disabled) { background: var(--bg); border-color: var(--sky); }
+.btn-sm { padding: 3px 8px; font-size: 11px; }
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { flex: 1; }
+.btn-icon { padding: 4px 8px; font-size: 13px; background: transparent; border: 1px solid var(--border); border-radius: 5px; cursor: pointer; color: var(--text-dim); font-family: var(--font-mono); transition: color 0.15s, border-color 0.2s, background 0.15s, box-shadow 0.2s; }
+.btn-icon:hover { color: var(--green); border-color: var(--green); background: rgba(63,185,80,0.08); box-shadow: var(--glow-green); }
+
+/* ── Right panel ── */
+.panel-right { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+/* ── Scan tabs bar ── */
+.scan-tabs-bar {
+  display: flex; align-items: center; background: var(--bg);
+  border-bottom: 1px solid var(--border); padding: 4px 8px;
+  gap: 4px; overflow-x: auto; flex-shrink: 0; min-height: 34px;
+}
+.scan-tab {
+  display: flex; align-items: center; gap: 5px; padding: 4px 10px;
+  border-radius: 6px; cursor: pointer; font-size: 11px; color: var(--text-dim);
+  border: 1px solid transparent; white-space: nowrap; user-select: none;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s; position: relative;
+}
+.scan-tab:hover { background: var(--surface); color: var(--text); }
+.scan-tab.active { background: var(--surface); border-color: var(--border); color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; transition: background 0.3s; }
+.tab-dot.running { background: var(--green); animation: pulseGlow 1.2s ease-in-out infinite; box-shadow: 0 0 6px var(--green); }
+.tab-dot.done    { background: var(--blue);  box-shadow: 0 0 5px var(--blue); }
+.tab-dot.error   { background: var(--red);   box-shadow: 0 0 5px var(--red); }
+.close-tab { margin-left: 2px; color: var(--text-dim); font-size: 10px; padding: 0 2px; border-radius: 2px; }
+.close-tab:hover { color: var(--red); background: rgba(248,81,73,0.15); }
+.btn-add-scan {
+  padding: 3px 8px; background: transparent; border: 1px dashed var(--border);
+  border-radius: 4px; color: var(--text-dim); cursor: pointer; font-size: 12px;
+  font-family: var(--font-mono); transition: color 0.15s, border-color 0.15s; flex-shrink: 0;
+}
+.btn-add-scan:hover { color: var(--green); border-color: var(--green); }
+
+/* ── Terminal section ── */
+.terminal-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+
+/* ── Terminal header ── */
+.terminal-header {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--border);
+  padding: 7px 12px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.terminal-title { color: var(--text); font-size: 12px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s; }
+.status-dot.running { background: var(--green); box-shadow: 0 0 10px var(--green), 0 0 20px rgba(63,185,80,0.3); animation: pulseGlow 1.2s ease-in-out infinite; }
+.status-dot.done    { background: var(--blue);  box-shadow: 0 0 8px var(--blue); }
+.status-dot.error   { background: var(--red);   box-shadow: 0 0 8px var(--red); }
+
+/* Progress bar */
+.progress-bar-wrap {
+  height: 3px; background: var(--border); flex-shrink: 0; overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green-dim), var(--green), var(--sky));
+  background-size: 200% 100%;
+  width: 0%;
+  transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 6px rgba(63,185,80,0.6);
+  animation: progressShimmer 2s linear infinite;
+}
+@keyframes progressShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Findings summary bar */
+.findings-bar {
+  display: none; flex-wrap: wrap; gap: 6px; padding: 5px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.finding-chip {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 2px 10px; font-size: 11px; color: var(--text-dim); white-space: nowrap;
+}
+.finding-chip b { color: var(--sky); }
+.finding-chip.sev-critical { border-color: var(--red);    color: var(--red); }
+.finding-chip.sev-critical b { color: var(--red); }
+.finding-chip.sev-high     { border-color: #f0883e;        color: #f0883e; }
+.finding-chip.sev-high b   { color: #f0883e; }
+.finding-chip.sev-medium   { border-color: var(--yellow);  color: var(--yellow); }
+.finding-chip.sev-medium b { color: var(--yellow); }
+.finding-chip.sev-low      { border-color: var(--green);   color: var(--green); }
+.finding-chip.sev-low b    { color: var(--green); }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+@keyframes pulseGlow {
+  0%,100% { opacity:1; box-shadow: 0 0 10px var(--green), 0 0 20px rgba(63,185,80,0.3); }
+  50%     { opacity:0.6; box-shadow: 0 0 4px var(--green), 0 0 8px rgba(63,185,80,0.15); }
+}
+@keyframes slideInLeft { from { opacity:0; transform: translateX(-8px); } to { opacity:1; transform:none; } }
+
+/* ── Terminal ── */
+#terminal {
+  flex: 1; overflow-y: auto; padding: 12px 16px;
+  background: #0d1117 !important; /* always dark */
+  color: #c9d1d9 !important;
+  line-height: 1.5; white-space: pre-wrap; word-break: break-all; font-size: 12px;
+}
+.log-line { display: block; }
+.log-line.info  { color: #3fb950; }
+.log-line.warn  { color: #d29922; }
+.log-line.error { color: #f85149; }
+.log-line.debug { color: #6e7681; }
+.log-line.done  { color: #79c0ff; font-weight: bold; }
+.log-line.plain { color: #c9d1d9; }
+
+/* ── Exec input bar ── */
+#exec-input-bar {
+  display: none; flex-shrink: 0; background: var(--surface);
+  border-top: 1px solid var(--border); padding: 8px 12px;
+  gap: 6px; flex-direction: column;
+}
+.exec-cmd-row { display: flex; gap: 6px; }
+.exec-cmd-row input { flex: 1; font-size: 13px; padding: 6px 10px; }
+.exec-hint { font-size: 10px; color: var(--text-dim); }
+
+/* ── Results panel ── */
+.results-panel {
+  height: 230px; flex-shrink: 0; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  position: relative;
+}
+.results-resize-handle {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  cursor: row-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.15s;
+}
+.results-resize-handle:hover { background: var(--green); opacity: 0.5; }
+.results-header {
+  padding: 6px 12px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+}
+.results-header span { color: var(--sky); font-size: 12px; }
+.results-body { display: flex; flex: 1; overflow: hidden; }
+.file-list { width: 260px; min-width: 160px; border-right: 1px solid var(--border); overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; }
+.file-search-wrap { padding: 4px 6px; flex-shrink: 0; }
+.file-search-wrap input { font-size: 11px; padding: 4px 8px; }
+.file-item {
+  padding: 5px 12px; cursor: pointer; font-size: 11px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background 0.15s, color 0.15s; display: flex; align-items: center; gap: 6px;
+}
+.file-item:hover { background: rgba(63,185,80,0.07); color: var(--text); }
+.file-item.active { background: rgba(63,185,80,0.12); color: var(--green); }
+.file-item .size { margin-left: auto; font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+.file-item .diff-btn {
+  flex-shrink: 0; padding: 1px 4px; font-size: 10px; border-radius: 3px;
+  background: transparent; border: 1px solid var(--border); cursor: pointer;
+  color: var(--text-dim); font-family: var(--font-mono); margin-left: 3px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.file-item .diff-btn:hover { color: var(--sky); border-color: var(--sky); }
+.file-item .diff-btn.marked { color: var(--yellow); border-color: var(--yellow); }
+
+/* File viewer with line numbers */
+.file-viewer-wrap { flex: 1; overflow: auto; display: flex; background: var(--bg); }
+.line-numbers {
+  flex-shrink: 0; padding: 10px 8px; background: var(--surface);
+  border-right: 1px solid var(--border); font-size: 11px; line-height: 1.5;
+  color: var(--text-dim); text-align: right; user-select: none; min-width: 36px;
+  white-space: pre;
+}
+.file-viewer {
+  flex: 1; overflow: auto; padding: 10px 14px; background: var(--bg);
+  font-size: 11px; line-height: 1.5; white-space: pre; word-break: normal; color: var(--text);
+}
+/* override hljs background for inline use */
+.file-viewer pre, .file-viewer code { background: transparent !important; padding: 0 !important; font-size: 11px !important; font-family: var(--font-mono) !important; white-space: pre-wrap; word-break: break-all; }
+.no-results { padding: 20px; color: var(--text-dim); font-size: 12px; text-align: center; }
+
+/* ── Crypto tab ── */
+.crypto-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.crypto-card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; position: relative; }
+.crypto-card:hover { border-color: var(--sky); }
+.crypto-card:hover .crypto-remove { opacity: 1; }
+.crypto-remove {
+  position: absolute; top: 5px; right: 6px; opacity: 0;
+  background: none; border: none; cursor: pointer; color: var(--text-dim);
+  font-size: 11px; padding: 1px 3px; border-radius: 3px;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  font-family: var(--font-mono);
+}
+.crypto-remove:hover { color: var(--red); background: rgba(248,81,73,0.12); }
+.crypto-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; padding-right: 14px; }
+.crypto-symbol { font-size: 13px; color: var(--sky); font-weight: 600; }
+.crypto-name   { font-size: 10px; color: var(--text-dim); }
+.crypto-price  { font-size: 14px; color: var(--text); font-weight: 600; }
+.crypto-change { font-size: 11px; margin-top: 2px; }
+.crypto-change.up   { color: var(--green); }
+.crypto-change.down { color: var(--red); }
+.crypto-sparkline { width: 100%; height: 32px; margin-top: 4px; display: block; }
+.crypto-footer { font-size: 10px; color: var(--text-dim); text-align: center; padding: 4px 0 2px; }
+.crypto-loading { color: var(--text-dim); font-size: 12px; text-align: center; padding: 20px 0; }
+
+/* Portfolio */
+.portfolio-section { margin-top: 8px; }
+.portfolio-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.portfolio-row input { flex: 1; padding: 4px 7px; font-size: 11px; }
+.portfolio-entry { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.portfolio-total { text-align: right; font-size: 13px; color: var(--sky); font-weight: bold; margin-top: 6px; }
+
+/* Price alerts */
+.alerts-section { margin-top: 8px; }
+.alert-row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.alert-row input, .alert-row select { flex: 1; min-width: 60px; padding: 4px 7px; font-size: 11px; }
+select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-mono); outline: none; }
+.alert-entry { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+.alert-triggered { color: var(--red); font-weight: bold; }
+
+/* ── Tool check output ── */
+#tool-check-output {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px; font-size: 11px; line-height: 1.6; color: var(--text);
+  white-space: pre-wrap; min-height: 60px; max-height: 200px; overflow-y: auto;
+}
+
+/* ── History / Profile / Schedule list items ── */
+.list-entry {
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  background: var(--bg); display: flex; flex-direction: column; gap: 4px;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  animation: slideInLeft 0.2s ease both;
+}
+.list-entry:hover { border-color: var(--sky); box-shadow: var(--glow-blue); transform: translateX(2px); }
+.list-entry-row { display: flex; align-items: center; gap: 6px; }
+.list-entry-title { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.list-entry-meta  { font-size: 10px; color: var(--text-dim); }
+.status-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: bold; }
+.status-done  { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green-dim); }
+.status-error { background: rgba(248,81,73,0.15); color: var(--red);   border: 1px solid #6b2020; }
+.status-running { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid #6b5510; }
+
+/* ── Toast notifications ── */
+#toast-container {
+  position: fixed; bottom: 16px; right: 16px; z-index: 999;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.toast {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; font-size: 12px; color: var(--text); max-width: 320px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5); pointer-events: auto;
+  animation: slideIn 0.3s cubic-bezier(0.34,1.56,0.64,1); transition: opacity 0.4s, transform 0.3s;
+}
+.toast.toast-green   { border-color: var(--green-dim); box-shadow: 0 6px 20px rgba(0,0,0,0.5), var(--glow-green); }
+.toast.toast-red     { border-color: var(--red);       box-shadow: 0 6px 20px rgba(0,0,0,0.5), var(--glow-red); }
+.toast.toast-yellow  { border-color: var(--yellow);    box-shadow: 0 6px 20px rgba(0,0,0,0.5), 0 0 8px rgba(210,153,34,0.4); }
+.toast.toast-confirm { border-color: var(--yellow); display: flex; flex-direction: column; gap: 8px; }
+.toast-confirm-btns  { display: flex; gap: 6px; justify-content: flex-end; }
+.toast-btn-yes { background: var(--red); color: #fff; border: none; border-radius: 5px; padding: 3px 12px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; transition: box-shadow 0.2s; }
+.toast-btn-no  { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 3px 12px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; transition: background 0.15s; }
+.toast-btn-yes:hover { box-shadow: var(--glow-red); opacity: 0.85; }
+.toast-btn-no:hover  { background: var(--border); }
+@keyframes slideIn { from { transform: translateX(60px) scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ── Modal ── */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 100; align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; animation: fadeInPage 0.2s ease both; }
+.modal {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  width: 82vw; max-width: 1100px; height: 72vh; display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-header {
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.modal-header span { color: var(--sky); font-size: 12px; }
+.modal-close { cursor: pointer; color: var(--text-dim); font-size: 18px; line-height: 1; background: none; border: none; font-family: var(--font-mono); }
+.modal-close:hover { color: var(--text); }
+.modal-body {
+  flex: 1; overflow: auto; padding: 14px 16px; background: var(--bg);
+  font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text);
+}
+
+/* diff modal */
+.diff-wrap { display: flex; flex: 1; overflow: hidden; }
+.diff-side { flex: 1; overflow: auto; padding: 10px 14px; background: var(--bg); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.diff-side + .diff-side { border-left: 1px solid var(--border); }
+.diff-line-add { background: rgba(63,185,80,0.12); color: var(--green); display: block; }
+.diff-line-del { background: rgba(248,81,73,0.12); color: var(--red); display: block; }
+.diff-line-same{ color: var(--text-dim); display: block; }
+
+/* search results in modal */
+.search-result-item { border-bottom: 1px solid var(--border); padding: 6px 0; }
+.search-result-item .sr-file { color: var(--sky); font-size: 11px; }
+.search-result-item .sr-line { color: var(--text-dim); font-size: 10px; }
+.search-result-item .sr-content { color: var(--text); font-size: 12px; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+
+/* ── Notification settings toggles ── */
+.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; }
+.toggle-row span { font-size: 12px; color: var(--text); }
+.toggle-switch { position: relative; width: 34px; height: 18px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: var(--border); border-radius: 18px; transition: background 0.2s;
+}
+.toggle-slider:before {
+  content: ''; position: absolute; height: 12px; width: 12px;
+  left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: transform 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider { background: var(--green-dim); }
+.toggle-switch input:checked + .toggle-slider:before { transform: translateX(16px); }
+
+/* ── Mobile backdrop ── */
+.mobile-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 199;
+  backdrop-filter: blur(2px);
+}
+
+/* ══════════════════════════════════════════
+   RESPONSIVE — Tablet (≤900px)
+══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  :root { --panel-left-width: 280px; }
+  header pre { display: none; }
+  .sys-stats { display: none; }
+  .header-meta span:last-child { display: none; }
+}
+
+/* ══════════════════════════════════════════
+   RESPONSIVE — Mobile (≤680px)
+══════════════════════════════════════════ */
+@media (max-width: 680px) {
+  /* Show hamburger, hide drag handle */
+  .mobile-menu-btn { display: flex !important; }
+  .drag-handle { display: none !important; }
+
+  /* Left panel: hidden slide-in overlay */
+  .panel-left {
+    position: fixed !important;
+    left: 0; top: 0; bottom: 0;
+    z-index: 200;
+    width: 85vw !important;
+    max-width: 340px;
+    min-width: 0 !important;
+    transform: translateX(-105%);
+    transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    overflow-y: auto;
+  }
+  .panel-left.mobile-open {
+    transform: translateX(0);
+  }
+  .panel-left.collapsed {
+    transform: translateX(-105%) !important;
+    width: 85vw !important;
+  }
+  .panel-left.collapsed > * { display: flex !important; }
+
+  /* Right panel fills whole screen */
+  .panel-right { width: 100%; }
+
+  /* Header: compact */
+  header { padding: 6px 10px; gap: 6px; }
+  header pre { display: none; }
+  .header-meta span { font-size: 10px; }
+  .header-meta { gap: 2px; }
+  .sys-stats { display: none; }
+  .header-actions { gap: 4px; }
+
+  /* Scan tabs: smaller */
+  .scan-tabs-bar { padding: 3px 6px; min-height: 30px; }
+  .scan-tab { padding: 3px 8px; font-size: 10px; }
+
+  /* Terminal */
+  #terminal { font-size: 11px; }
+  .exec-input { font-size: 12px; padding: 6px 8px; }
+
+  /* Results panel: stack vertically */
+  .results-panel { height: auto; max-height: 45vh; }
+  .results-body { flex-direction: column; }
+  .file-list {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 110px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .file-search-wrap { width: 100%; flex-shrink: 0; }
+  .file-viewer-wrap { height: 180px; }
+
+  /* Tab labels: slightly larger touch targets */
+  .tab { padding: 10px 8px; font-size: 11px; }
+  .tab-content { padding: 10px; }
+
+  /* Buttons: larger tap targets */
+  .btn { padding: 6px 12px; font-size: 12px; }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .btn-icon { width: 32px; height: 32px; font-size: 15px; }
+
+  /* Forms */
+  input[type="text"], input[type="password"], textarea, select {
+    font-size: 14px !important; /* prevents iOS zoom */
+  }
+
+  /* Findings bar: wrap */
+  .findings-bar { flex-wrap: wrap; gap: 4px; }
+
+  /* Section titles */
+  .section-title { font-size: 11px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Toast container ── -->
+<div id="toast-container"></div>
+
+<!-- ── Header ── -->
+<header>
+  <button class="btn-icon" id="btn-collapse-panel" title="Toggle left panel" onclick="toggleLeftPanel()">&#9776;</button>
+  <pre style="font-size:8px;">
+  ______      __                      __  __            __
+ / ____/___ _/ /________  ____  ___  / / / /_  ______  / /____  _____
+/ /_  / __ `/ / ___/ __ \/ __ \/ _ \/ /_/ / / / / __ \/ __/ _ \/ ___/
+/ __/ / /_/ / / /__/ /_/ / / / /  __/ __  / /_/ / / / / /_/  __/ /
+/_/    \__,_/_/\___/\____/_/ /_/\___/_/ /_/\__,_/_/ /_/\__/\___/_/</pre>
+  <div class="header-meta">
+    <span>Active Reconnaissance &amp; Vulnerability Scanner</span>
+    <span>Coder: <a href="https://github.com/octayus" target="_blank">OctaYus0x01</a></span>
+    <div style="display:flex;gap:6px;margin-top:3px;">
+      <span id="scan-badge" class="badge badge-green">&#9679; IDLE</span>
+    </div>
+  </div>
+  <div class="sys-stats" id="sys-stats">
+    <div class="sys-stat">
+      <span class="sys-stat-label">CPU</span>
+      <span class="sys-stat-val" id="stat-cpu">--</span>
+      <div class="sys-stat-mini-bar"><div class="sys-stat-mini-fill" id="stat-cpu-bar" style="width:0%"></div></div>
+    </div>
+    <div class="sys-stat">
+      <span class="sys-stat-label">RAM</span>
+      <span class="sys-stat-val" id="stat-ram">--</span>
+      <div class="sys-stat-mini-bar"><div class="sys-stat-mini-fill" id="stat-ram-bar" style="width:0%"></div></div>
+    </div>
+    <div class="sys-stat">
+      <span class="sys-stat-label">Uptime</span>
+      <span class="sys-stat-val uptime-stat" id="stat-uptime">--</span>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn-icon mobile-menu-btn" id="mobile-menu-btn" title="Menu" onclick="toggleMobilePanel()" style="display:none;">&#9776;</button>
+    <button class="btn-icon" id="btn-theme" title="Toggle theme" onclick="toggleTheme()">&#9681;</button>
+    <form method="POST" action="/logout" style="display:inline;margin:0;padding:0;">
+      <button type="submit" class="btn-icon" title="Log out" style="color:var(--text-dim);font-size:14px;">&#x23CF;</button>
+    </form>
+  </div>
+</header>
+<div class="mobile-backdrop" id="mobile-backdrop" onclick="closeMobilePanel()"></div>
+
+<!-- ── Main layout ── -->
+<div class="main">
+
+  <!-- ── Left panel ── -->
+  <div class="panel-left" id="panel-left">
+    <div class="drag-handle" id="drag-handle"></div>
+
+    <!-- 6 tabs -->
+    <div class="tabs">
+      <div class="tab active" data-tab="config">Config</div>
+      <div class="tab" data-tab="profiles">Profiles</div>
+      <div class="tab" data-tab="schedule">Schedule</div>
+      <div class="tab" data-tab="history">History</div>
+      <div class="tab" data-tab="tools">Tools</div>
+      <div class="tab" data-tab="crypto">Crypto</div>
+    </div>
+
+    <!-- Config tab (includes scan options) -->
+    <div class="tab-content active" id="tab-config">
+      <div class="form-group">
+        <label>Target Domains</label>
+        <textarea id="domains" rows="5" placeholder="example.com&#10;target.org&#10;..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Output Directory</label>
+        <input type="text" id="output" value="scan_results" placeholder="scan_results">
+      </div>
+      <div class="form-group">
+        <label>Config File</label>
+        <input type="text" id="config" value="config.yaml" placeholder="config.yaml">
+      </div>
+      <div class="form-group">
+        <label>Auth0 Email (optional)</label>
+        <input type="text" id="email" placeholder="test@example.com">
+      </div>
+
+      <div class="section-title" style="margin-top:4px;">Scan Modules</div>
+      <div class="checkbox-group">
+        <label class="checkbox-item"><input type="checkbox" id="opt-nuclei"><span>Nuclei</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-ffuf"><span>FFUF</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-cors"><span>CORS</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-crlf"><span>CRLF</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-dirsearch"><span>DirSearch</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-403"><span>403 Bypass</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-api"><span>API Discovery</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-xss"><span>XSS (dalfox)</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-redirect"><span>Open Redirect</span></label>
+        <label class="checkbox-item"><input type="checkbox" id="opt-secrets"><span>Secrets</span></label>
+      </div>
+
+      <div class="section-title" style="margin-top:6px;">Wordlists</div>
+      <div class="form-group">
+        <label>FFUF Wordlist</label>
+        <input type="text" id="opt-wordlist" placeholder="~/Tools/wordlists/ffuf-common.txt">
+      </div>
+      <div class="form-group">
+        <label>DirSearch Wordlist</label>
+        <input type="text" id="opt-dirsearch-wordlist" placeholder="leave blank for default">
+      </div>
+      <div class="form-group">
+        <label>API Discovery Wordlist</label>
+        <input type="text" id="opt-api-wordlist" placeholder="~/Tools/wordlists/api-endpoints.txt">
+      </div>
+
+      <div class="btn-row" style="margin-top:4px;">
+        <button class="btn btn-primary" id="btn-start" onclick="startScan()">&#9654; Start Scan</button>
+        <button class="btn btn-danger"  id="btn-stop"  onclick="stopScan()" disabled>&#9632; Stop</button>
+      </div>
+    </div>
+
+    <!-- Profiles tab -->
+    <div class="tab-content" id="tab-profiles">
+      <div class="section-title">Scan Profiles</div>
+      <div class="btn-row" style="margin-bottom:6px;">
+        <button class="btn btn-secondary" onclick="promptSaveProfile()">Save Current</button>
+        <button class="btn btn-secondary" onclick="loadProfilesList()">Refresh</button>
+      </div>
+      <div id="profiles-list"><div class="no-results">Loading...</div></div>
+    </div>
+
+    <!-- Schedule tab -->
+    <div class="tab-content" id="tab-schedule">
+      <div class="section-title">New Schedule</div>
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="sched-name" placeholder="Daily scan">
+      </div>
+      <div class="form-group">
+        <label>Target Domains</label>
+        <textarea id="sched-domains" rows="3" placeholder="example.com"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Output Dir</label>
+        <input type="text" id="sched-output" value="scheduled_results">
+      </div>
+      <div class="form-group">
+        <label>Interval (minutes)</label>
+        <input type="number" id="sched-interval" value="60" min="5">
+      </div>
+      <div class="form-group">
+        <label>Start Date/Time</label>
+        <input type="datetime-local" id="sched-start">
+      </div>
+      <button class="btn btn-primary" onclick="createSchedule()">Add Schedule</button>
+      <div class="section-title" style="margin-top:8px;">Schedules</div>
+      <div id="schedules-list"><div class="no-results">Loading...</div></div>
+    </div>
+
+    <!-- History tab -->
+    <div class="tab-content" id="tab-history">
+      <div class="section-title">Scan History</div>
+      <div class="btn-row" style="margin-bottom:6px;">
+        <button class="btn btn-secondary" onclick="loadHistoryList()">Refresh</button>
+        <button class="btn btn-danger btn-sm" onclick="clearAllHistory()">Clear All</button>
+      </div>
+      <div id="history-list"><div class="no-results">Loading...</div></div>
+    </div>
+
+    <!-- Tools tab -->
+    <div class="tab-content" id="tab-tools">
+      <div class="section-title">Tool Status</div>
+      <p style="color:var(--text-dim);font-size:11px;margin-bottom:8px;">Check which tools are available in PATH.</p>
+      <button class="btn btn-secondary" onclick="checkTools()">Check Tools</button>
+      <div id="tool-check-output" style="margin-top:10px;display:none;"></div>
+
+      <div class="section-title" style="margin-top:14px;">Notification Settings</div>
+      <div class="toggle-row">
+        <span>Browser notifications</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notif-toggle" onchange="saveNotifSettings()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span>Sound alerts</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="sound-toggle" onchange="saveNotifSettings()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Crypto tab -->
+    <div class="tab-content" id="tab-crypto">
+      <div class="section-title">Crypto Prices</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span id="crypto-last-update" style="font-size:10px;color:var(--text-dim);">Not loaded yet</span>
+        <button class="btn btn-secondary btn-sm" onclick="fetchCryptoPrices()">&#8635; Refresh</button>
+      </div>
+      <div id="crypto-grid" class="crypto-grid">
+        <div class="crypto-loading">Click Refresh to load prices.</div>
+      </div>
+      <div style="margin-top:8px;">
+        <div class="section-title" style="margin-bottom:6px;">Add Coin</div>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="crypto-add-input" placeholder="symbol (e.g. DOT, AVAX)" style="flex:1;font-size:11px;padding:5px 8px;">
+          <button class="btn btn-secondary btn-sm" onclick="addCryptoCoin()">Add</button>
+        </div>
+        <span style="font-size:10px;color:var(--text-dim);">Enter Binance symbol (must have a USDT pair)</span>
+      </div>
+
+      <!-- Portfolio -->
+      <div class="portfolio-section">
+        <div class="section-title" style="margin-bottom:6px;">Portfolio</div>
+        <div class="portfolio-row">
+          <input type="text" id="port-coin" placeholder="coin id" style="flex:1;">
+          <input type="number" id="port-amount" placeholder="amount" style="flex:1;" min="0" step="any">
+          <button class="btn btn-secondary btn-sm" onclick="addPortfolioEntry()">Add</button>
+        </div>
+        <div id="portfolio-entries"></div>
+        <div class="portfolio-total" id="portfolio-total"></div>
+      </div>
+
+      <!-- Price Alerts -->
+      <div class="alerts-section">
+        <div class="section-title" style="margin-bottom:6px;">Price Alerts</div>
+        <div class="alert-row">
+          <input type="text" id="alert-coin" placeholder="coin id">
+          <select id="alert-dir"><option value="above">above</option><option value="below">below</option></select>
+          <input type="number" id="alert-price" placeholder="price" step="any" min="0">
+          <button class="btn btn-secondary btn-sm" onclick="addPriceAlert()">Set</button>
+        </div>
+        <div id="price-alerts-list"></div>
+      </div>
+    </div>
+
+
+  </div><!-- /panel-left -->
+
+  <!-- ── Right panel ── -->
+  <div class="panel-right">
+
+    <!-- Scan/Exec tab bar -->
+    <div class="scan-tabs-bar" id="scan-tabs-bar">
+      <button class="btn-add-scan" onclick="addScanTab()" title="New Scan">+ New Scan</button>
+    </div>
+
+    <!-- Terminal section wraps terminal-header + progress + findings + terminal -->
+    <div class="terminal-section">
+      <!-- Terminal header -->
+      <div class="terminal-header">
+        <div class="status-dot" id="status-dot"></div>
+        <span class="terminal-title" id="terminal-title">[ FalconHunter Terminal ]</span>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <button class="btn btn-secondary btn-sm" id="btn-theme" onclick="toggleTheme()" title="Toggle light/dark theme">&#9788;</button>
+          <button class="btn btn-secondary btn-sm" id="btn-autoscroll" onclick="toggleAutoScroll()" title="Toggle auto-scroll">AS: ON</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearTerminal()">Clear</button>
+          <button class="btn btn-secondary btn-sm" id="btn-refresh-results" onclick="loadResults()">&#8635; Results</button>
+        </div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-bar-fill"></div></div>
+
+      <!-- Findings summary bar -->
+      <div class="findings-bar" id="findings-bar">
+        <span class="finding-chip">Files: <b id="fc-files">0</b></span>
+        <span class="finding-chip">Lines: <b id="fc-lines">0</b></span>
+        <span class="finding-chip">URLs: <b id="fc-urls">0</b></span>
+        <span class="finding-chip">IPs: <b id="fc-ips">0</b></span>
+        <span class="finding-chip">Subs: <b id="fc-subs">0</b></span>
+        <span class="finding-chip sev-critical">CRIT: <b id="fc-critical">0</b></span>
+        <span class="finding-chip sev-high">HIGH: <b id="fc-high">0</b></span>
+        <span class="finding-chip sev-medium">MED: <b id="fc-medium">0</b></span>
+        <span class="finding-chip sev-low">LOW: <b id="fc-low">0</b></span>
+        <button class="btn btn-secondary btn-sm" id="btn-export-report" onclick="exportReport()" style="display:none;margin-left:auto;font-size:10px;padding:2px 8px;">&#8595; Report</button>
+      </div>
+
+      <div id="terminal">
+        <span class="log-line plain">  ______      __                      __  __            __
+ / ____/___ _/ /________  ____  ___  / / / /_  ______  / /____  _____
+/ /_  / __ `/ / ___/ __ \/ __ \/ _ \/ /_/ / / / / __ \/ __/ _ \/ ___/
+/ __/ / /_/ / / /__/ /_/ / / / /  __/ __  / /_/ / / / / /_/  __/ /
+/_/    \__,_/_/\___/\____/_/ /_/\___/_/ /_/\__,_/_/ /_/\__/\___/_/</span>
+<span class="log-line info">
+[*] Configure your scan in the left panel and press Start Scan.
+[*] Use the Exec tab for running arbitrary commands.
+[*] Add multiple scan tabs to run scans in parallel.
+</span>
+      </div>
+    </div><!-- /terminal-section -->
+
+    <!-- Exec input bar (shown only in exec mode) -->
+    <div id="exec-input-bar">
+      <div class="exec-cmd-row">
+        <input type="text" id="exec-cmd" placeholder="Enter command..." onkeydown="execKeydown(event)" autocomplete="off" spellcheck="false">
+        <button class="btn btn-primary"   id="btn-exec-run"  onclick="runExec()"          style="padding:6px 12px;font-size:12px;">&#9654; Run</button>
+        <button class="btn btn-danger"    id="btn-exec-kill" onclick="killCurrentExec()"   style="padding:6px 12px;font-size:12px;" disabled>&#9632; Kill</button>
+        <button class="btn btn-secondary"                    onclick="clearTerminal()"      style="padding:6px 10px;font-size:12px;">Clear</button>
+        <button class="btn btn-secondary"                    onclick="saveExecOutput()"     style="padding:6px 10px;font-size:12px;">Save</button>
+      </div>
+      <span class="exec-hint">Up/Down for history &nbsp;&middot;&nbsp; Enter to run &nbsp;&middot;&nbsp; cwd: FalconHunter/</span>
+    </div>
+
+    <!-- Results panel (shown only for scan tabs) -->
+    <div class="results-panel" id="results-panel">
+      <div class="results-resize-handle" id="results-resize-handle"></div>
+      <div class="results-header">
+        <span>Results Browser</span>
+        <span id="results-dir-label" style="color:var(--text-dim);font-size:11px;"></span>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="results-search-input" placeholder="Search files..." style="width:120px;font-size:11px;padding:3px 8px;" oninput="filterResultsSearch(this.value)">
+          <button class="btn btn-secondary btn-sm" onclick="openCrossFileSearch()">Search Content</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportZip()">Export ZIP</button>
+          <button class="btn btn-secondary btn-sm" id="btn-diff" onclick="runDiff()">Diff</button>
+        </div>
+      </div>
+      <div class="results-body">
+        <div class="file-list" id="file-list">
+          <div class="file-search-wrap">
+            <input type="text" id="file-filter-input" placeholder="Filter by name..." oninput="filterFiles(this.value)" style="width:100%;">
+          </div>
+          <div id="file-list-items">
+            <div class="no-results">No results yet. Run a scan first.</div>
+          </div>
+        </div>
+        <div class="file-viewer-wrap">
+          <div class="line-numbers" id="line-numbers"></div>
+          <div class="file-viewer" id="file-viewer">
+            <span style="color:#6e7681;">Select a file to view its contents.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /panel-right -->
+</div><!-- /main -->
+
+<!-- ── Modal (multi-purpose) ── -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModalOverlay(event)">
+  <div class="modal" id="modal-box">
+    <div class="modal-header">
+      <span id="modal-title">File Viewer</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="modal-extra-actions"></span>
+        <button class="modal-close" onclick="closeModal()">&#10005;</button>
+      </div>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════════
+
+// Each scan: { id, outputDir, lines[], status, eventSource, target }
+const scans = [];
+let activeScanIdx = -1;  // -1 = exec tab
+
+const execState = {
+  lines: [],
+  currentExecId: null,
+  eventSource: null,
+  running: false,
+  history: [],
+  histIdx: -1,
+};
+
+let autoScroll = true;
+
+// Diff state
+let diffMarkedFile = null; // { abs, path }
+let currentViewFile = null;
+
+// All loaded result files
+let currentResultFiles = [];
+
+// ════════════════════════════════════════════════════════════════════
+// THEME
+// ════════════════════════════════════════════════════════════════════
+
+function applyTheme(theme) {
+  document.body.classList.toggle('light-theme', theme === 'light');
+  document.getElementById('btn-theme').textContent = theme === 'light' ? '\u2600' : '\u263D';
+}
+
+function toggleTheme() {
+  const current = localStorage.getItem('fh-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('fh-theme', next);
+  applyTheme(next);
+}
+
+applyTheme(localStorage.getItem('fh-theme') || 'dark');
+
+// ════════════════════════════════════════════════════════════════════
+// SYSTEM STATS WIDGET
+// ════════════════════════════════════════════════════════════════════
+
+function formatUptime(s) {
+  if (s < 60)   return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  return h + 'h ' + m + 'm';
+}
+
+async function fetchSystemStats() {
+  try {
+    const res = await apiFetch('/system_stats');
+    if (!res.ok) return;
+    const d = await res.json();
+    const cpuEl   = document.getElementById('stat-cpu');
+    const ramEl   = document.getElementById('stat-ram');
+    const uptEl   = document.getElementById('stat-uptime');
+    const cpuBar  = document.getElementById('stat-cpu-bar');
+    const ramBar  = document.getElementById('stat-ram-bar');
+    if (!cpuEl) return;
+
+    const cpuPct = d.cpu || 0;
+    const ramPct = d.ram || 0;
+    cpuEl.textContent = cpuPct.toFixed(0) + '%';
+    ramEl.textContent = ramPct.toFixed(0) + '%';
+    uptEl.textContent = formatUptime(d.uptime_s || 0);
+    cpuBar.style.width = cpuPct + '%';
+    ramBar.style.width = ramPct + '%';
+    // color based on load
+    cpuEl.className = 'sys-stat-val' + (cpuPct > 85 ? ' critical' : cpuPct > 65 ? ' warn' : '');
+    ramEl.className = 'sys-stat-val' + (ramPct > 85 ? ' critical' : ramPct > 65 ? ' warn' : '');
+    cpuBar.style.background = cpuPct > 85 ? 'var(--red)' : cpuPct > 65 ? 'var(--yellow)' : 'var(--sky)';
+    ramBar.style.background = ramPct > 85 ? 'var(--red)' : ramPct > 65 ? 'var(--yellow)' : 'var(--green)';
+  } catch {}
+}
+
+fetchSystemStats();
+setInterval(fetchSystemStats, 4000);
+
+// ════════════════════════════════════════════════════════════════════
+// LEFT PANEL TABS
+// ════════════════════════════════════════════════════════════════════
+
+document.querySelectorAll('.tab[data-tab]').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const name = tab.dataset.tab;
+    document.querySelectorAll('.tab[data-tab]').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+    if (name === 'crypto')   initCryptoTab();
+    if (name === 'profiles') loadProfilesList();
+    if (name === 'history')  loadHistoryList();
+    if (name === 'schedule') { loadSchedulesList(); initScheduleDatetime(); }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// LEFT PANEL COLLAPSE + DRAG RESIZE
+// ════════════════════════════════════════════════════════════════════
+
+function toggleLeftPanel() {
+  const panel = document.getElementById('panel-left');
+  panel.classList.toggle('collapsed');
+}
+
+(function initDrag() {
+  const handle = document.getElementById('drag-handle');
+  const panel  = document.getElementById('panel-left');
+  let dragging = false, startX = 0, startW = 0;
+
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startW = panel.offsetWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const newW = Math.max(200, Math.min(600, startW + (e.clientX - startX)));
+    panel.style.width = newW + 'px';
+    document.documentElement.style.setProperty('--panel-left-width', newW + 'px');
+  });
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════
+// RESULTS PANEL VERTICAL RESIZE
+// ════════════════════════════════════════════════════════════════════
+
+(function initResultsResize() {
+  const handle = document.getElementById('results-resize-handle');
+  const panel  = document.getElementById('results-panel');
+  let dragging = false, startY = 0, startH = 0;
+
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startY = e.clientY;
+    startH = panel.offsetHeight;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    // dragging up increases height, dragging down decreases
+    const newH = Math.max(120, Math.min(window.innerHeight * 0.75, startH - (e.clientY - startY)));
+    panel.style.height = newH + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════
+// SCAN TAB MANAGEMENT
+// ════════════════════════════════════════════════════════════════════
+
+function createScan(target) {
+  const scan = {
+    id: null, outputDir: null, lines: [], status: 'idle',
+    eventSource: null, target: target || '', progress: 0
+  };
+  scans.push(scan);
+  renderScanTabs();
+  return scans.length - 1;
+}
+
+function addScanTab() {
+  const idx = createScan();
+  switchToScanTab(idx);
+}
+
+function closeScanTab(e, idx) {
+  e.stopPropagation();
+  const scan = scans[idx];
+  if (scan.eventSource) scan.eventSource.close();
+  scans.splice(idx, 1);
+  if (scans.length === 0) {
+    activeScanIdx = -1;
+    renderScanTabs();
+    applyRightPanelMode();
+    return;
+  }
+  const newIdx = Math.min(idx, scans.length - 1);
+  activeScanIdx = newIdx;
+  renderScanTabs();
+  applyRightPanelMode();
+}
+
+function switchToScanTab(idx) {
+  activeScanIdx = idx;
+  renderScanTabs();
+  applyRightPanelMode();
+}
+
+function switchToExecTab() {
+  activeScanIdx = -1;
+  renderScanTabs();
+  applyRightPanelMode();
+}
+
+function renderScanTabs() {
+  const bar = document.getElementById('scan-tabs-bar');
+  const addBtn = bar.querySelector('.btn-add-scan');
+  bar.innerHTML = '';
+
+  scans.forEach((scan, i) => {
+    const tab = document.createElement('div');
+    tab.className = 'scan-tab' + (activeScanIdx === i ? ' active' : '');
+    if (scan.target) tab.title = scan.target;
+
+    const dot = document.createElement('span');
+    dot.className = 'tab-dot ' + (scan.status || 'idle');
+    tab.appendChild(dot);
+
+    const label = document.createElement('span');
+    label.textContent = 'Scan ' + (i + 1);
+    tab.appendChild(label);
+
+    if (scan.target) {
+      const sub = document.createElement('span');
+      sub.style.cssText = 'font-size:10px;color:var(--text-dim);max-width:80px;overflow:hidden;text-overflow:ellipsis;';
+      sub.textContent = scan.target.split('\n')[0].trim();
+      tab.appendChild(sub);
+    }
+
+    const closeBtn = document.createElement('span');
+    closeBtn.className = 'close-tab';
+    closeBtn.textContent = '\u2715';
+    closeBtn.onclick = (e) => closeScanTab(e, i);
+    tab.appendChild(closeBtn);
+
+    tab.onclick = () => switchToScanTab(i);
+    bar.appendChild(tab);
+  });
+
+  // Exec tab
+  const execTab = document.createElement('div');
+  execTab.className = 'scan-tab' + (activeScanIdx === -1 ? ' active' : '');
+  execTab.innerHTML = '<span class="tab-dot ' + (execState.running ? 'running' : 'idle') + '"></span><span>Exec</span>';
+  execTab.onclick = switchToExecTab;
+  bar.appendChild(execTab);
+
+  bar.appendChild(addBtn);
+}
+
+function applyRightPanelMode() {
+  const terminal   = document.getElementById('terminal');
+  const execBar    = document.getElementById('exec-input-bar');
+  const resPan     = document.getElementById('results-panel');
+  const refreshBtn = document.getElementById('btn-refresh-results');
+  const findBar    = document.getElementById('findings-bar');
+
+  if (activeScanIdx === -1) {
+    execBar.style.display = 'flex';
+    resPan.style.display  = 'none';
+    refreshBtn.style.display = 'none';
+    findBar.style.display = 'none';
+    renderTerminalLines(execState.lines);
+    document.getElementById('terminal-title').textContent = '[ Exec Terminal ]';
+    updateHeaderForExec();
+    setProgress(0);
+  } else {
+    execBar.style.display = 'none';
+    resPan.style.display  = 'flex';
+    refreshBtn.style.display = '';
+    const scan = scans[activeScanIdx];
+    renderTerminalLines(scan ? scan.lines : []);
+    updateHeaderForScan(activeScanIdx);
+    if (scan && scan.outputDir) {
+      loadResultsForDir(scan.outputDir);
+    } else {
+      clearResultsPanel();
+    }
+    updateStartStopButtons(activeScanIdx);
+    setProgress(scan ? (scan.progress || 0) : 0);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PROGRESS BAR
+// ════════════════════════════════════════════════════════════════════
+
+const TOOL_STAGES = [
+  { kw: 'subfinder',  pct: 10 },
+  { kw: 'dnsx',       pct: 20 },
+  { kw: 'httpx',      pct: 35 },
+  { kw: 'gf',         pct: 45 },
+  { kw: 'ffuf',       pct: 55 },
+  { kw: 'dirsearch',  pct: 65 },
+  { kw: 'cors',       pct: 72 },
+  { kw: 'crlf',       pct: 78 },
+  { kw: '403',        pct: 83 },
+  { kw: 'nuclei',     pct: 92 },
+  { kw: 'scan complete', pct: 100 },
+  { kw: 'done is good',  pct: 100 },
+];
+
+function setProgress(pct) {
+  document.getElementById('progress-bar-fill').style.width = pct + '%';
+}
+
+function updateProgressFromLine(idx, line) {
+  const l = line.toLowerCase();
+  let maxPct = scans[idx].progress || 0;
+  for (const stage of TOOL_STAGES) {
+    if (l.includes(stage.kw) && stage.pct > maxPct) {
+      maxPct = stage.pct;
+    }
+  }
+  scans[idx].progress = maxPct;
+  if (activeScanIdx === idx) setProgress(maxPct);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TERMINAL HELPERS
+// ════════════════════════════════════════════════════════════════════
+
+function renderTerminalLines(lines) {
+  const term = document.getElementById('terminal');
+  term.innerHTML = '';
+  lines.forEach(({ text, cls }) => {
+    const span = document.createElement('span');
+    span.className = 'log-line ' + cls;
+    span.textContent = text;
+    term.appendChild(span);
+  });
+  if (autoScroll) term.scrollTop = term.scrollHeight;
+}
+
+const terminalEl = document.getElementById('terminal');
+terminalEl.addEventListener('scroll', () => {
+  autoScroll = terminalEl.scrollTop + terminalEl.clientHeight >= terminalEl.scrollHeight - 50;
+  updateAutoScrollBtn();
+});
+
+function updateAutoScrollBtn() {
+  const btn = document.getElementById('btn-autoscroll');
+  if (btn) btn.textContent = 'AS: ' + (autoScroll ? 'ON' : 'OFF');
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light-theme');
+  localStorage.setItem('fh-theme', isLight ? 'light' : 'dark');
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.title = isLight ? 'Switch to dark theme' : 'Switch to light theme';
+}
+
+// ── Mobile panel ──
+function toggleMobilePanel() {
+  const panel = document.getElementById('panel-left');
+  const backdrop = document.getElementById('mobile-backdrop');
+  const open = panel.classList.toggle('mobile-open');
+  backdrop.style.display = open ? 'block' : 'none';
+}
+function closeMobilePanel() {
+  document.getElementById('panel-left').classList.remove('mobile-open');
+  document.getElementById('mobile-backdrop').style.display = 'none';
+}
+// Close panel when a tab is clicked on mobile
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    if (window.innerWidth <= 680) closeMobilePanel();
+  });
+});
+
+// Apply saved theme on load
+(function() {
+  if (localStorage.getItem('fh-theme') === 'light') {
+    document.body.classList.add('light-theme');
+  }
+})();
+
+
+// ── API fetch wrapper — adds Accept: application/json and handles session expiry ──
+async function apiFetch(url, opts = {}) {
+  opts.headers = Object.assign({ 'Accept': 'application/json' }, opts.headers || {});
+  const res = await fetch(url, opts);
+  if (res.status === 401) { window.location.href = '/login'; throw new Error('session expired'); }
+  // Detect silent redirect: fetch followed 302 → 200 login HTML
+  const ct = res.headers.get('content-type') || '';
+  if (res.ok && !ct.includes('json') && !ct.includes('event-stream')) {
+    window.location.href = '/login';
+    throw new Error('session expired');
+  }
+  return res;
+}
+
+function toggleAutoScroll() {
+  autoScroll = !autoScroll;
+  updateAutoScrollBtn();
+  if (autoScroll) terminalEl.scrollTop = terminalEl.scrollHeight;
+}
+
+function appendToScan(idx, text, cls) {
+  cls = cls || classifyLine(text);
+  scans[idx].lines.push({ text, cls });
+  updateProgressFromLine(idx, text);
+  if (activeScanIdx === idx) appendToTerminalDOM(text, cls);
+}
+
+function appendToExec(text, cls) {
+  cls = cls || 'plain';
+  execState.lines.push({ text, cls });
+  if (activeScanIdx === -1) appendToTerminalDOM(text, cls);
+}
+
+function appendToTerminalDOM(text, cls) {
+  const span = document.createElement('span');
+  span.className = 'log-line ' + cls;
+  span.textContent = text;
+  terminalEl.appendChild(span);
+  if (autoScroll) terminalEl.scrollTop = terminalEl.scrollHeight;
+}
+
+function clearTerminal() {
+  if (activeScanIdx === -1) {
+    execState.lines = [];
+  } else if (scans[activeScanIdx]) {
+    scans[activeScanIdx].lines = [];
+  }
+  terminalEl.innerHTML = '';
+}
+
+function classifyLine(line) {
+  const l = line.toLowerCase();
+  if (l.includes('error') || l.includes('(-) ') || l.includes('failed') || l.includes('exception')) return 'error';
+  if (l.includes('warning') || l.includes('(!) ') || l.includes('optional')) return 'warn';
+  if (l.includes('(+) ') || l.includes('[+]') || l.includes('completed') || l.includes('success')) return 'info';
+  if (l.includes('[scan complete]') || l.includes('done is good')) return 'done';
+  if (l.includes('debug')) return 'debug';
+  return 'plain';
+}
+
+// ════════════════════════════════════════════════════════════════════
+// STATUS / HEADER
+// ════════════════════════════════════════════════════════════════════
+
+function updateHeaderForScan(idx) {
+  const scan = scans[idx];
+  if (!scan) return;
+  const dot   = document.getElementById('status-dot');
+  const badge = document.getElementById('scan-badge');
+  const title = document.getElementById('terminal-title');
+  const s = scan.status;
+  dot.className = 'status-dot ' + s;
+  if (s === 'running') {
+    badge.className = 'badge badge-yellow'; badge.textContent = '\u25CF RUNNING';
+    title.textContent = '[ Scan ' + (idx + 1) + ' \u2014 Scanning... ]';
+  } else if (s === 'done') {
+    badge.className = 'badge badge-green'; badge.textContent = '\u25CF DONE';
+    title.textContent = '[ Scan ' + (idx + 1) + ' \u2014 Complete ]';
+  } else if (s === 'error') {
+    badge.className = 'badge badge-red'; badge.textContent = '\u25CF ERROR';
+    title.textContent = '[ Scan ' + (idx + 1) + ' \u2014 Error ]';
+  } else {
+    badge.className = 'badge badge-green'; badge.textContent = '\u25CF IDLE';
+    title.textContent = '[ Scan ' + (idx + 1) + ' \u2014 Idle ]';
+  }
+}
+
+function updateHeaderForExec() {
+  const dot   = document.getElementById('status-dot');
+  const badge = document.getElementById('scan-badge');
+  dot.className = 'status-dot ' + (execState.running ? 'running' : 'idle');
+  if (execState.running) {
+    badge.className = 'badge badge-yellow'; badge.textContent = '\u25CF EXEC';
+  } else {
+    badge.className = 'badge badge-green'; badge.textContent = '\u25CF IDLE';
+  }
+}
+
+function updateStartStopButtons(idx) {
+  const scan = scans[idx];
+  const running = scan && scan.status === 'running';
+  document.getElementById('btn-start').disabled = running;
+  document.getElementById('btn-stop').disabled  = !running;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SCAN — START / STOP
+// ════════════════════════════════════════════════════════════════════
+
+async function startScan() {
+  const domains = document.getElementById('domains').value.trim();
+  if (!domains) { showToast('Please enter at least one domain.', 'toast-red'); return; }
+
+  // Request notification permission
+  if (document.getElementById('notif-toggle').checked && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+
+  let idx = activeScanIdx;
+  if (idx === -1 || (scans[idx] && scans[idx].status === 'running')) {
+    idx = createScan(domains);
+  } else {
+    scans[idx].target = domains;
+  }
+
+  activeScanIdx = idx;
+  scans[idx].status   = 'running';
+  scans[idx].lines    = [];
+  scans[idx].progress = 0;
+  renderScanTabs();
+  applyRightPanelMode();
+  updateStartStopButtons(idx);
+  autoScroll = true;
+  updateAutoScrollBtn();
+  setProgress(0);
+  document.getElementById('findings-bar').style.display = 'none';
+
+  const outputDir = document.getElementById('output').value.trim() || 'scan_results';
+  const payload = {
+    domains, output: outputDir,
+    config:              document.getElementById('config').value.trim() || 'config.yaml',
+    email:               document.getElementById('email').value.trim(),
+    nuclei:              document.getElementById('opt-nuclei').checked,
+    ffuf:                document.getElementById('opt-ffuf').checked,
+    wordlist:            document.getElementById('opt-wordlist').value.trim(),
+    cors:                document.getElementById('opt-cors').checked,
+    crlf:                document.getElementById('opt-crlf').checked,
+    dirsearch:           document.getElementById('opt-dirsearch').checked,
+    dirsearch_wordlist:  document.getElementById('opt-dirsearch-wordlist').value.trim(),
+    bypass_403:          document.getElementById('opt-403').checked,
+    api:                 document.getElementById('opt-api').checked,
+    api_wordlist:        document.getElementById('opt-api-wordlist').value.trim(),
+    xss:                 document.getElementById('opt-xss').checked,
+    redirect:            document.getElementById('opt-redirect').checked,
+    secrets:             document.getElementById('opt-secrets').checked,
+  };
+
+  try {
+    const res = await fetch('/start_scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      appendToScan(idx, '[ERROR] ' + (err.error || 'Failed to start scan'), 'error');
+      scans[idx].status = 'error';
+      renderScanTabs(); updateHeaderForScan(idx); updateStartStopButtons(idx);
+      return;
+    }
+
+    const data = await res.json();
+    scans[idx].id        = data.scan_id;
+    scans[idx].outputDir = data.output_dir;
+    document.getElementById('results-dir-label').textContent = data.output_dir;
+
+    appendToScan(idx, '[*] Scan started (id: ' + data.scan_id + ')', 'info');
+    appendToScan(idx, '[*] Output directory: ' + data.output_dir + '\n', 'info');
+
+    const es = new EventSource('/stream/' + data.scan_id);
+    scans[idx].eventSource = es;
+
+    es.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.heartbeat) return;
+      if (msg.done) {
+        appendToScan(idx, '\n[+] Scan finished.', 'done');
+        scans[idx].status = 'done';
+        scans[idx].progress = 100;
+        scans[idx].eventSource = null;
+        es.close();
+        renderScanTabs();
+        if (activeScanIdx === idx) {
+          updateHeaderForScan(idx);
+          updateStartStopButtons(idx);
+          setProgress(100);
+          setTimeout(() => {
+            loadResultsForDir(scans[idx].outputDir);
+            loadFindingsSummary(scans[idx].outputDir);
+          }, 800);
+        }
+        // Notifications
+        notifyScanDone(idx);
+        soundAlert();
+        showToast('Scan ' + (idx+1) + ' complete!', 'toast-green');
+        return;
+      }
+      if (msg.line) appendToScan(idx, msg.line.replace(/\n$/, ''));
+    };
+
+    es.onerror = () => {
+      if (scans[idx] && scans[idx].status === 'running') {
+        appendToScan(idx, '[!] Stream connection lost.', 'warn');
+        scans[idx].status = 'error';
+        scans[idx].eventSource = null;
+        es.close();
+        renderScanTabs();
+        if (activeScanIdx === idx) { updateHeaderForScan(idx); updateStartStopButtons(idx); }
+      }
+    };
+
+  } catch (err) {
+    appendToScan(idx, '[ERROR] ' + err.message, 'error');
+    scans[idx].status = 'error';
+    renderScanTabs(); updateHeaderForScan(idx); updateStartStopButtons(idx);
+  }
+}
+
+async function stopScan() {
+  const idx = activeScanIdx;
+  if (idx < 0 || !scans[idx] || !scans[idx].id) return;
+  try {
+    await fetch('/stop_scan/' + scans[idx].id, { method: 'POST' });
+    appendToScan(idx, '[!] Stop signal sent.', 'warn');
+  } catch (e) {
+    appendToScan(idx, '[!] Failed to send stop signal: ' + e.message, 'warn');
+  }
+  if (scans[idx].eventSource) { scans[idx].eventSource.close(); scans[idx].eventSource = null; }
+  scans[idx].status = 'idle';
+  renderScanTabs(); updateHeaderForScan(idx); updateStartStopButtons(idx);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// FINDINGS SUMMARY
+// ════════════════════════════════════════════════════════════════════
+
+let _lastFindingsDir = '';
+async function loadFindingsSummary(outputDir) {
+  try {
+    const res = await apiFetch('/findings_summary?dir=' + encodeURIComponent(outputDir));
+    if (!res.ok) return;
+    const d = await res.json();
+    document.getElementById('fc-files').textContent    = d.files       || 0;
+    document.getElementById('fc-lines').textContent    = d.lines       || 0;
+    document.getElementById('fc-urls').textContent     = d.urls        || 0;
+    document.getElementById('fc-ips').textContent      = d.ips         || 0;
+    document.getElementById('fc-subs').textContent     = d.subdomains  || 0;
+    document.getElementById('fc-critical').textContent = d.critical    || 0;
+    document.getElementById('fc-high').textContent     = d.high        || 0;
+    document.getElementById('fc-medium').textContent   = d.medium      || 0;
+    document.getElementById('fc-low').textContent      = d.low         || 0;
+    // Show/hide export button
+    _lastFindingsDir = outputDir;
+    const exportBtn = document.getElementById('btn-export-report');
+    if (exportBtn) exportBtn.style.display = '';
+    document.getElementById('findings-bar').style.display = 'flex';
+  } catch {}
+}
+
+function exportReport() {
+  if (!_lastFindingsDir) return;
+  window.location.href = '/export_report?dir=' + encodeURIComponent(_lastFindingsDir);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// RESULTS BROWSER
+// ════════════════════════════════════════════════════════════════════
+
+function loadResults() {
+  const idx = activeScanIdx;
+  if (idx >= 0 && scans[idx] && scans[idx].outputDir) {
+    loadResultsForDir(scans[idx].outputDir);
+    loadFindingsSummary(scans[idx].outputDir);
+  } else {
+    const dir = document.getElementById('output').value.trim() || 'scan_results';
+    loadResultsForDir(dir);
+  }
+}
+
+async function loadResultsForDir(outputDir) {
+  document.getElementById('results-dir-label').textContent = outputDir;
+  currentResultFiles = [];
+  try {
+    const res  = await apiFetch('/results?dir=' + encodeURIComponent(outputDir));
+    const data = await res.json();
+    currentResultFiles = data.files || [];
+    renderFileList(currentResultFiles, outputDir);
+  } catch (err) {
+    document.getElementById('file-list-items').innerHTML = '<div class="no-results">Error: ' + err.message + '</div>';
+  }
+}
+
+function renderFileList(files, outputDir) {
+  const listEl = document.getElementById('file-list-items');
+  listEl.innerHTML = '';
+
+  if (!files || files.length === 0) {
+    listEl.innerHTML = '<div class="no-results">No result files found.</div>';
+    return;
+  }
+
+  const groups = {};
+  files.forEach(f => {
+    const parts  = f.path.split('/');
+    const folder = parts.length > 1 ? parts[0] : '(root)';
+    if (!groups[folder]) groups[folder] = [];
+    groups[folder].push(f);
+  });
+
+  Object.keys(groups).sort().forEach(folder => {
+    const sep = document.createElement('div');
+    sep.style.cssText = 'padding:4px 10px;font-size:10px;color:var(--sky);text-transform:uppercase;letter-spacing:0.5px;margin-top:4px;';
+    sep.textContent = folder;
+    listEl.appendChild(sep);
+
+    groups[folder].forEach(f => {
+      const item  = document.createElement('div');
+      item.className   = 'file-item';
+      item.dataset.path = f.path;
+      const fname = f.path.split('/').pop();
+
+      const nameSpan = document.createElement('span');
+      nameSpan.style.cssText = 'overflow:hidden;text-overflow:ellipsis;flex:1;';
+      nameSpan.textContent = fname;
+
+      const sizeSpan = document.createElement('span');
+      sizeSpan.className   = 'size';
+      sizeSpan.textContent = formatSize(f.size);
+
+      const diffBtn = document.createElement('button');
+      diffBtn.className   = 'diff-btn';
+      diffBtn.textContent = 'D';
+      diffBtn.title = 'Mark for diff';
+      diffBtn.onclick = (e) => {
+        e.stopPropagation();
+        markForDiff(f, diffBtn);
+      };
+
+      item.appendChild(nameSpan);
+      item.appendChild(sizeSpan);
+      item.appendChild(diffBtn);
+      item.title = f.path;
+      item.addEventListener('click', () => viewFile(f.abs, f.path, item));
+      listEl.appendChild(item);
+    });
+  });
+}
+
+function filterFiles(query) {
+  const items = document.querySelectorAll('#file-list-items .file-item');
+  const q = query.toLowerCase();
+  items.forEach(item => {
+    item.style.display = (!q || item.dataset.path.toLowerCase().includes(q)) ? '' : 'none';
+  });
+}
+
+function filterResultsSearch(query) {
+  filterFiles(query);
+}
+
+function clearResultsPanel() {
+  document.getElementById('results-dir-label').textContent = '';
+  document.getElementById('file-list-items').innerHTML = '<div class="no-results">No results yet. Run a scan first.</div>';
+  setFileViewer('', '');
+  document.getElementById('findings-bar').style.display = 'none';
+}
+
+function setFileViewer(content, path) {
+  const viewer  = document.getElementById('file-viewer');
+  const lineNos = document.getElementById('line-numbers');
+  if (!content) {
+    viewer.innerHTML = '<span style="color:#6e7681;">Select a file to view its contents.</span>';
+    lineNos.textContent = '';
+    return;
+  }
+  const lines = content.split('\n');
+  lineNos.textContent = lines.map((_, i) => i + 1).join('\n');
+
+  // Syntax highlighting
+  const ext = (path || '').split('.').pop().toLowerCase();
+  const langMap = { json: 'json', yaml: 'yaml', yml: 'yaml', py: 'python', js: 'javascript',
+                    sh: 'bash', txt: 'plaintext', md: 'markdown', html: 'html', xml: 'xml',
+                    go: 'go', rb: 'ruby', csv: 'plaintext' };
+  const lang = langMap[ext] || 'plaintext';
+  const pre  = document.createElement('pre');
+  const code = document.createElement('code');
+  code.className = 'language-' + lang;
+  code.textContent = content;
+  pre.appendChild(code);
+  viewer.innerHTML = '';
+  viewer.appendChild(pre);
+  try { hljs.highlightElement(code); } catch {}
+}
+
+async function viewFile(absPath, relPath, itemEl) {
+  document.querySelectorAll('.file-item').forEach(i => i.classList.remove('active'));
+  if (itemEl) itemEl.classList.add('active');
+  currentViewFile = { abs: absPath, path: relPath };
+
+  const viewer  = document.getElementById('file-viewer');
+  const lineNos = document.getElementById('line-numbers');
+  viewer.textContent = 'Loading...';
+  lineNos.textContent = '';
+
+  try {
+    const res  = await apiFetch('/file?path=' + encodeURIComponent(absPath));
+    const data = await res.json();
+    if (data.error) { viewer.textContent = 'Error: ' + data.error; return; }
+
+    if (data.content.length > 80000) {
+      // Open large files in modal
+      document.getElementById('modal-title').textContent = relPath;
+      const body = document.getElementById('modal-body');
+      body.innerHTML = '';
+      const pre  = document.createElement('pre');
+      const code = document.createElement('code');
+      const ext  = (relPath || '').split('.').pop().toLowerCase();
+      const langMap = { json:'json', yaml:'yaml', yml:'yaml', py:'python', js:'javascript',
+                        sh:'bash', txt:'plaintext', md:'markdown', html:'html', xml:'xml' };
+      code.className = 'language-' + (langMap[ext] || 'plaintext');
+      code.textContent = data.content;
+      pre.appendChild(code);
+      body.appendChild(pre);
+      try { hljs.highlightElement(code); } catch {}
+      document.getElementById('modal-extra-actions').innerHTML = '';
+      document.getElementById('modal-overlay').classList.add('open');
+      setFileViewer('', '');
+      lineNos.textContent = '...';
+    } else {
+      setFileViewer(data.content, relPath);
+    }
+  } catch (err) {
+    viewer.textContent = 'Error loading file: ' + err.message;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// EXPORT ZIP
+// ════════════════════════════════════════════════════════════════════
+
+function exportZip() {
+  const idx = activeScanIdx;
+  let dir = '';
+  if (idx >= 0 && scans[idx] && scans[idx].outputDir) {
+    dir = scans[idx].outputDir;
+  } else {
+    dir = document.getElementById('output').value.trim() || 'scan_results';
+  }
+  window.open('/export_zip?dir=' + encodeURIComponent(dir), '_blank');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// CROSS-FILE SEARCH
+// ════════════════════════════════════════════════════════════════════
+
+function openCrossFileSearch() {
+  const idx = activeScanIdx;
+  let dir = '';
+  if (idx >= 0 && scans[idx] && scans[idx].outputDir) {
+    dir = scans[idx].outputDir;
+  } else {
+    dir = document.getElementById('output').value.trim() || 'scan_results';
+  }
+  showPrompt('Search across result files:', 'keyword...', q => performCrossFileSearch(dir, q));
+}
+
+async function performCrossFileSearch(dir, query) {
+  document.getElementById('modal-title').textContent = 'Search: ' + query;
+  document.getElementById('modal-extra-actions').innerHTML = '';
+  const body = document.getElementById('modal-body');
+  body.textContent = 'Searching...';
+  document.getElementById('modal-overlay').classList.add('open');
+
+  try {
+    const res  = await apiFetch('/search_files?dir=' + encodeURIComponent(dir) + '&q=' + encodeURIComponent(query));
+    const data = await res.json();
+    body.innerHTML = '';
+
+    if (!data.matches || data.matches.length === 0) {
+      body.textContent = 'No matches found.';
+      return;
+    }
+
+    if (data.truncated) {
+      const note = document.createElement('div');
+      note.style.cssText = 'color:var(--yellow);margin-bottom:8px;font-size:11px;';
+      note.textContent = '[Results truncated at 500 matches]';
+      body.appendChild(note);
+    }
+
+    data.matches.forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'search-result-item';
+      div.innerHTML =
+        '<div class="sr-file">' + escHtml(m.file) + ' <span class="sr-line">line ' + m.line + '</span></div>' +
+        '<div class="sr-content">' + escHtml(m.content) + '</div>';
+      body.appendChild(div);
+    });
+  } catch (err) {
+    body.textContent = 'Error: ' + err.message;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// DIFF VIEW
+// ════════════════════════════════════════════════════════════════════
+
+function markForDiff(fileObj, btnEl) {
+  // Unmark previous
+  document.querySelectorAll('.diff-btn.marked').forEach(b => b.classList.remove('marked'));
+  diffMarkedFile = fileObj;
+  btnEl.classList.add('marked');
+  showToast('Marked: ' + fileObj.path.split('/').pop() + ' for diff', 'toast-yellow');
+}
+
+async function runDiff() {
+  if (!diffMarkedFile || !currentViewFile) {
+    showToast('Mark a file with D, then open another to diff.', 'toast-red'); return;
+    return;
+  }
+  if (diffMarkedFile.abs === currentViewFile.abs) {
+    showToast('Select two different files to diff.', 'toast-red'); return;
+    return;
+  }
+
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch('/file?path=' + encodeURIComponent(diffMarkedFile.abs)).then(r => r.json()),
+      fetch('/file?path=' + encodeURIComponent(currentViewFile.abs)).then(r => r.json()),
+    ]);
+
+    document.getElementById('modal-title').textContent =
+      diffMarkedFile.path.split('/').pop() + '  vs  ' + currentViewFile.path.split('/').pop();
+    document.getElementById('modal-extra-actions').innerHTML = '';
+
+    const body  = document.getElementById('modal-body');
+    body.innerHTML = '';
+    body.style.padding = '0';
+    body.style.overflow = 'hidden';
+    body.style.display = 'flex';
+
+    const left  = buildDiffSide(r1.content || '', r2.content || '', 'left');
+    const right = buildDiffSide(r1.content || '', r2.content || '', 'right');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'diff-wrap';
+    wrap.style.flex = '1';
+    wrap.style.overflow = 'hidden';
+
+    const leftHead  = makeDiffHeader(diffMarkedFile.path.split('/').pop());
+    const rightHead = makeDiffHeader(currentViewFile.path.split('/').pop());
+
+    const leftWrap  = document.createElement('div');
+    leftWrap.style.cssText = 'flex:1;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--border);';
+    leftWrap.appendChild(leftHead);
+    leftWrap.appendChild(left);
+
+    const rightWrap = document.createElement('div');
+    rightWrap.style.cssText = 'flex:1;overflow:auto;display:flex;flex-direction:column;';
+    rightWrap.appendChild(rightHead);
+    rightWrap.appendChild(right);
+
+    wrap.appendChild(leftWrap);
+    wrap.appendChild(rightWrap);
+    body.appendChild(wrap);
+
+    document.getElementById('modal-overlay').classList.add('open');
+  } catch (err) {
+    showToast('Error loading files: ' + err.message, 'toast-red');
+  }
+}
+
+function makeDiffHeader(name) {
+  const h = document.createElement('div');
+  h.style.cssText = 'padding:6px 12px;background:var(--surface);border-bottom:1px solid var(--border);font-size:11px;color:var(--sky);flex-shrink:0;';
+  h.textContent = name;
+  return h;
+}
+
+function buildDiffSide(textA, textB, side) {
+  const linesA = textA.split('\n');
+  const linesB = textB.split('\n');
+  const div = document.createElement('div');
+  div.className = 'diff-side';
+  div.style.flex = '1';
+
+  const maxLen = Math.max(linesA.length, linesB.length);
+  for (let i = 0; i < maxLen; i++) {
+    const a = linesA[i] !== undefined ? linesA[i] : '';
+    const b = linesB[i] !== undefined ? linesB[i] : '';
+    const span = document.createElement('span');
+    if (a !== b) {
+      span.className = side === 'left' ? 'diff-line-del' : 'diff-line-add';
+      span.textContent = (side === 'left' ? a : b);
+    } else {
+      span.className = 'diff-line-same';
+      span.textContent = a;
+    }
+    div.appendChild(span);
+  }
+  return div;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// EXEC
+// ════════════════════════════════════════════════════════════════════
+
+async function runExec() {
+  const input = document.getElementById('exec-cmd');
+  const cmd   = input.value.trim();
+  if (!cmd) return;
+
+  if (execState.history[execState.history.length - 1] !== cmd) {
+    execState.history.push(cmd);
+    if (execState.history.length > 50) execState.history.shift();
+  }
+  execState.histIdx = execState.history.length;
+
+  appendToExec('$ ' + cmd, 'info');
+  input.value   = '';
+  input.disabled = true;
+  document.getElementById('btn-exec-run').disabled  = true;
+  document.getElementById('btn-exec-kill').disabled = false;
+  execState.running = true;
+
+  if (activeScanIdx === -1) updateHeaderForExec();
+  renderScanTabs();
+
+  try {
+    const res  = await fetch('/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd }),
+    });
+    const data = await res.json();
+    if (data.error) { appendToExec('[ERROR] ' + data.error, 'error'); resetExecUI(); return; }
+
+    execState.currentExecId = data.exec_id;
+    const es = new EventSource('/exec_stream/' + data.exec_id);
+    execState.eventSource = es;
+
+    es.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.heartbeat) return;
+      if (msg.done) { es.close(); execState.eventSource = null; resetExecUI(); return; }
+      if (msg.line) appendToExec(msg.line.replace(/\n$/, ''));
+    };
+
+    es.onerror = () => {
+      if (execState.eventSource) { es.close(); execState.eventSource = null; }
+      appendToExec('[!] Stream connection lost.', 'warn');
+      resetExecUI();
+    };
+
+  } catch (err) {
+    appendToExec('[ERROR] ' + err.message, 'error');
+    resetExecUI();
+  }
+}
+
+function resetExecUI() {
+  execState.running = false;
+  execState.currentExecId = null;
+  const input = document.getElementById('exec-cmd');
+  input.disabled = false; input.focus();
+  document.getElementById('btn-exec-run').disabled  = false;
+  document.getElementById('btn-exec-kill').disabled = true;
+  if (activeScanIdx === -1) updateHeaderForExec();
+  renderScanTabs();
+}
+
+async function killCurrentExec() {
+  if (!execState.currentExecId) return;
+  try { await fetch('/kill_exec/' + execState.currentExecId, { method: 'POST' }); } catch {}
+  appendToExec('[!] Kill signal sent.', 'warn');
+  if (execState.eventSource) { execState.eventSource.close(); execState.eventSource = null; }
+  resetExecUI();
+}
+
+function execKeydown(e) {
+  if (e.key === 'Enter') { runExec(); return; }
+  const h = execState.history;
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (execState.histIdx > 0) {
+      execState.histIdx--;
+      document.getElementById('exec-cmd').value = h[execState.histIdx];
+    }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (execState.histIdx < h.length - 1) {
+      execState.histIdx++;
+      document.getElementById('exec-cmd').value = h[execState.histIdx];
+    } else {
+      execState.histIdx = h.length;
+      document.getElementById('exec-cmd').value = '';
+    }
+  }
+}
+
+function saveExecOutput() {
+  const lines = execState.lines.map(l => l.text).join('\n');
+  const blob = new Blob([lines], { type: 'text/plain' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'exec_output_' + Date.now() + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PROFILES
+// ════════════════════════════════════════════════════════════════════
+
+async function loadProfilesList() {
+  const container = document.getElementById('profiles-list');
+  container.innerHTML = '<div class="no-results">Loading...</div>';
+  try {
+    const res  = await apiFetch('/profiles');
+    const data = await res.json();
+    container.innerHTML = '';
+    if (!data.length) {
+      container.innerHTML = '<div class="no-results">No profiles saved.</div>';
+      return;
+    }
+    data.forEach(p => {
+      const entry = document.createElement('div');
+      entry.className = 'list-entry';
+      entry.innerHTML =
+        '<div class="list-entry-row">' +
+        '<span class="list-entry-title">' + escHtml(p.name) + '</span>' +
+        '<button class="btn btn-secondary btn-sm" onclick="loadProfile(' + JSON.stringify(JSON.stringify(p)) + ')">Load</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteProfile(\'' + p.id + '\')">Del</button>' +
+        '</div>' +
+        '<div class="list-entry-meta">' + (p.created_at || '') + '</div>';
+      container.appendChild(entry);
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="no-results">Error: ' + err.message + '</div>';
+  }
+}
+
+function loadProfile(jsonStr) {
+  try {
+    const p = JSON.parse(jsonStr);
+    const c = p.config || {};
+    if (c.domains !== undefined)        document.getElementById('domains').value = c.domains;
+    if (c.output !== undefined)         document.getElementById('output').value  = c.output;
+    if (c.config !== undefined)         document.getElementById('config').value  = c.config;
+    if (c.email !== undefined)          document.getElementById('email').value   = c.email;
+    if (c.nuclei !== undefined)         document.getElementById('opt-nuclei').checked = c.nuclei;
+    if (c.ffuf !== undefined)           document.getElementById('opt-ffuf').checked   = c.ffuf;
+    if (c.cors !== undefined)           document.getElementById('opt-cors').checked   = c.cors;
+    if (c.crlf !== undefined)           document.getElementById('opt-crlf').checked   = c.crlf;
+    if (c.dirsearch !== undefined)      document.getElementById('opt-dirsearch').checked = c.dirsearch;
+    if (c.bypass_403 !== undefined)     document.getElementById('opt-403').checked    = c.bypass_403;
+    if (c.api !== undefined)            document.getElementById('opt-api').checked     = c.api;
+    if (c.wordlist !== undefined)       document.getElementById('opt-wordlist').value  = c.wordlist;
+    if (c.dirsearch_wordlist !== undefined) document.getElementById('opt-dirsearch-wordlist').value = c.dirsearch_wordlist;
+    if (c.api_wordlist !== undefined)   document.getElementById('opt-api-wordlist').value = c.api_wordlist;
+    showToast('Profile "' + p.name + '" loaded', 'toast-green');
+  } catch {}
+}
+
+function deleteProfile(id) {
+  showConfirm('Delete this profile?', async () => {
+    await fetch('/profiles/' + id, { method: 'DELETE' });
+    loadProfilesList();
+    showToast('Profile deleted', 'toast-red');
+  });
+}
+
+function getCurrentConfig() {
+  return {
+    domains:           document.getElementById('domains').value,
+    output:            document.getElementById('output').value,
+    config:            document.getElementById('config').value,
+    email:             document.getElementById('email').value,
+    nuclei:            document.getElementById('opt-nuclei').checked,
+    ffuf:              document.getElementById('opt-ffuf').checked,
+    cors:              document.getElementById('opt-cors').checked,
+    crlf:              document.getElementById('opt-crlf').checked,
+    dirsearch:         document.getElementById('opt-dirsearch').checked,
+    bypass_403:        document.getElementById('opt-403').checked,
+    api:               document.getElementById('opt-api').checked,
+    wordlist:          document.getElementById('opt-wordlist').value,
+    dirsearch_wordlist:document.getElementById('opt-dirsearch-wordlist').value,
+    api_wordlist:      document.getElementById('opt-api-wordlist').value,
+  };
+}
+
+function promptSaveProfile() {
+  showPrompt('Profile name:', 'e.g. Full Scan', async name => {
+    const res = await fetch('/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, config: getCurrentConfig() }),
+    });
+    if (res.ok) {
+      showToast('Profile "' + name + '" saved', 'toast-green');
+      loadProfilesList();
+    }
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
+// HISTORY
+// ════════════════════════════════════════════════════════════════════
+
+async function loadHistoryList() {
+  const container = document.getElementById('history-list');
+  container.innerHTML = '<div class="no-results">Loading...</div>';
+  try {
+    const res  = await apiFetch('/history');
+    const data = await res.json();
+    container.innerHTML = '';
+    if (!data.length) {
+      container.innerHTML = '<div class="no-results">No scan history.</div>';
+      return;
+    }
+    data.forEach(h => {
+      const entry = document.createElement('div');
+      entry.className = 'list-entry';
+      const statusCls = h.status === 'done' ? 'status-done' : (h.status === 'error' ? 'status-error' : 'status-running');
+      entry.innerHTML =
+        '<div class="list-entry-row">' +
+        '<span class="status-badge ' + statusCls + '">' + (h.status || 'unknown') + '</span>' +
+        '<span class="list-entry-title">' + escHtml((h.target || '').substring(0, 40)) + '</span>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteHistoryEntry(\'' + h.id + '\')">Del</button>' +
+        '</div>' +
+        '<div class="list-entry-meta">' + (h.started_at || '') + '  dir: ' + escHtml(h.output_dir || '') + '</div>' +
+        '<button class="btn btn-secondary btn-sm" style="align-self:flex-start;margin-top:4px;" ' +
+        'onclick="loadHistoryResults(\'' + escHtml(h.output_dir) + '\')">Load Results</button>';
+      container.appendChild(entry);
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="no-results">Error: ' + err.message + '</div>';
+  }
+}
+
+function loadHistoryResults(outputDir) {
+  // Switch to a scan tab and load results
+  let idx = activeScanIdx;
+  if (idx < 0) {
+    idx = createScan('(history)');
+  }
+  scans[idx].outputDir = outputDir;
+  switchToScanTab(idx);
+  loadResultsForDir(outputDir);
+  loadFindingsSummary(outputDir);
+  document.getElementById('results-dir-label').textContent = outputDir;
+}
+
+async function deleteHistoryEntry(id) {
+  await fetch('/history/' + id, { method: 'DELETE' });
+  loadHistoryList();
+}
+
+function clearAllHistory() {
+  showConfirm('Clear all scan history?', async () => {
+    await fetch('/history', { method: 'DELETE' });
+    loadHistoryList();
+    showToast('History cleared', 'toast-red');
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SCHEDULES
+// ════════════════════════════════════════════════════════════════════
+
+function initScheduleDatetime() {
+  const el = document.getElementById('sched-start');
+  if (!el.value) {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    el.value = now.toISOString().slice(0, 16);
+  }
+}
+
+async function loadSchedulesList() {
+  const container = document.getElementById('schedules-list');
+  container.innerHTML = '<div class="no-results">Loading...</div>';
+  try {
+    const res  = await apiFetch('/schedules');
+    const data = await res.json();
+    container.innerHTML = '';
+    if (!data.length) {
+      container.innerHTML = '<div class="no-results">No schedules.</div>';
+      return;
+    }
+    data.forEach(s => {
+      const entry = document.createElement('div');
+      entry.className = 'list-entry';
+      const enabledTxt = s.enabled ? 'Enabled' : 'Disabled';
+      const enabledCls = s.enabled ? 'status-done' : 'status-error';
+      entry.innerHTML =
+        '<div class="list-entry-row">' +
+        '<span class="status-badge ' + enabledCls + '">' + enabledTxt + '</span>' +
+        '<span class="list-entry-title">' + escHtml(s.name) + '</span>' +
+        '<button class="btn btn-secondary btn-sm" onclick="toggleSchedule(\'' + s.id + '\')">Toggle</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteSchedule(\'' + s.id + '\')">Del</button>' +
+        '</div>' +
+        '<div class="list-entry-meta">Every ' + (s.interval_minutes || 60) + ' min | Next: ' + (s.next_run || 'N/A') + '</div>' +
+        '<div class="list-entry-meta">Last: ' + (s.last_run || 'never') + ' | Dir: ' + escHtml(s.output_dir || '') + '</div>';
+      container.appendChild(entry);
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="no-results">Error: ' + err.message + '</div>';
+  }
+}
+
+async function createSchedule() {
+  const name     = document.getElementById('sched-name').value.trim();
+  const domains  = document.getElementById('sched-domains').value.trim();
+  const output   = document.getElementById('sched-output').value.trim() || 'scheduled_results';
+  const interval = parseInt(document.getElementById('sched-interval').value) || 60;
+  const start    = document.getElementById('sched-start').value;
+
+  if (!name) { showToast('Please enter a schedule name.', 'toast-red'); return; }
+  if (!domains) { showToast('Please enter target domains.', 'toast-red'); return; }
+
+  const res = await fetch('/schedules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, domains, output_dir: output, interval_minutes: interval, start_datetime: start }),
+  });
+  if (res.ok) {
+    showToast('Schedule "' + name + '" created', 'toast-green');
+    document.getElementById('sched-name').value    = '';
+    document.getElementById('sched-domains').value = '';
+    loadSchedulesList();
+  }
+}
+
+async function toggleSchedule(id) {
+  const res  = await fetch('/schedules/' + id + '/toggle', { method: 'POST' });
+  const data = await res.json();
+  showToast('Schedule ' + (data.enabled ? 'enabled' : 'disabled'), data.enabled ? 'toast-green' : 'toast-yellow');
+  loadSchedulesList();
+}
+
+function deleteSchedule(id) {
+  showConfirm('Delete this schedule?', async () => {
+    await fetch('/schedules/' + id, { method: 'DELETE' });
+    loadSchedulesList();
+    showToast('Schedule deleted', 'toast-red');
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
+// NOTIFICATIONS & SOUND
+// ════════════════════════════════════════════════════════════════════
+
+function loadNotifSettings() {
+  const ns = JSON.parse(localStorage.getItem('fh-notif') || '{"notif":false,"sound":false}');
+  document.getElementById('notif-toggle').checked = !!ns.notif;
+  document.getElementById('sound-toggle').checked = !!ns.sound;
+}
+
+function saveNotifSettings() {
+  localStorage.setItem('fh-notif', JSON.stringify({
+    notif: document.getElementById('notif-toggle').checked,
+    sound: document.getElementById('sound-toggle').checked,
+  }));
+}
+
+function notifyScanDone(idx) {
+  const ns = JSON.parse(localStorage.getItem('fh-notif') || '{}');
+  if (ns.notif && Notification.permission === 'granted') {
+    new Notification('FalconHunter', { body: 'Scan ' + (idx+1) + ' complete!', icon: '' });
+  }
+}
+
+function soundAlert() {
+  const ns = JSON.parse(localStorage.getItem('fh-notif') || '{}');
+  if (!ns.sound) return;
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type      = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch {}
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TOAST SYSTEM
+// ════════════════════════════════════════════════════════════════════
+
+function showToast(msg, cls) {
+  cls = cls || 'toast-green';
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + cls;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 420);
+  }, 3000);
+}
+
+function showConfirm(msg, onConfirm) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-confirm';
+  toast.innerHTML =
+    `<span>${msg}</span>` +
+    `<div class="toast-confirm-btns">` +
+      `<button class="toast-btn-yes">Yes</button>` +
+      `<button class="toast-btn-no">Cancel</button>` +
+    `</div>`;
+  container.appendChild(toast);
+  const remove = () => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); };
+  toast.querySelector('.toast-btn-yes').onclick = () => { remove(); onConfirm(); };
+  toast.querySelector('.toast-btn-no').onclick  = () => remove();
+}
+
+function showPrompt(msg, placeholder, onSubmit) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-confirm';
+  toast.innerHTML =
+    `<span>${msg}</span>` +
+    `<input class="toast-input" type="text" placeholder="${placeholder}" style="width:100%;margin-top:4px;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--font-mono);font-size:12px;outline:none;">` +
+    `<div class="toast-confirm-btns">` +
+      `<button class="toast-btn-yes">OK</button>` +
+      `<button class="toast-btn-no">Cancel</button>` +
+    `</div>`;
+  container.appendChild(toast);
+  const input = toast.querySelector('.toast-input');
+  input.focus();
+  const remove = () => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); };
+  const submit = () => { const v = input.value.trim(); remove(); if (v) onSubmit(v); };
+  toast.querySelector('.toast-btn-yes').onclick = submit;
+  toast.querySelector('.toast-btn-no').onclick  = remove;
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') remove(); });
+}
+
+// ════════════════════════════════════════════════════════════════════
+// CRYPTO
+// ════════════════════════════════════════════════════════════════════
+
+const COINS = [
+  { id: 'bitcoin',     symbol: 'BTC',  name: 'Bitcoin'  },
+  { id: 'ethereum',    symbol: 'ETH',  name: 'Ethereum' },
+  { id: 'solana',      symbol: 'SOL',  name: 'Solana'   },
+  { id: 'binancecoin', symbol: 'BNB',  name: 'BNB'      },
+  { id: 'cardano',     symbol: 'ADA',  name: 'Cardano'  },
+  { id: 'ripple',      symbol: 'XRP',  name: 'XRP'      },
+  { id: 'dogecoin',    symbol: 'DOGE', name: 'Dogecoin' },
+];
+
+let cryptoData        = {};
+let sparklineData     = {};
+let cryptoRefreshTimer = null;
+
+// Portfolio: [{ coinId, amount }]
+let portfolio = JSON.parse(localStorage.getItem('fh-portfolio') || '[]');
+// Price alerts: [{ coinId, direction, price }]
+let priceAlerts = JSON.parse(localStorage.getItem('fh-alerts') || '[]');
+
+function initCryptoTab() {
+  if (Object.keys(cryptoData).length === 0) fetchCryptoPrices();
+  if (!cryptoRefreshTimer) {
+    cryptoRefreshTimer = setInterval(fetchCryptoPrices, 30000);
+  }
+  renderPortfolio();
+  renderPriceAlerts();
+}
+
+async function fetchCryptoPrices() {
+  // Build symbol→id reverse map so response can be re-keyed by coin.id
+  const symToId = {};
+  COINS.forEach(c => { symToId[c.symbol.toLowerCase()] = c.id; });
+
+  const syms = COINS.map(c => c.symbol).join(',');
+  const url  = `/crypto_prices?symbols=${encodeURIComponent(syms)}`;
+  document.getElementById('crypto-last-update').textContent = 'Loading...';
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'HTTP ' + res.status);
+    }
+    const arr = await res.json();
+    cryptoData    = {};
+    sparklineData = {};
+    arr.forEach(coin => {
+      // coin.id from backend is lowercase symbol (e.g. 'btc'); map back to coin.id ('bitcoin')
+      const key = symToId[coin.id] || coin.id;
+      cryptoData[key] = {
+        usd:            coin.current_price,
+        usd_24h_change: coin.price_change_percentage_24h,
+        symbol:         coin.symbol.toUpperCase(),
+        name:           coin.name,
+      };
+      if (coin.sparkline_in_7d && coin.sparkline_in_7d.price) {
+        sparklineData[key] = coin.sparkline_in_7d.price;
+      }
+    });
+    renderCryptoPrices();
+    checkPriceAlerts();
+    renderPortfolio();
+    const now = new Date();
+    document.getElementById('crypto-last-update').textContent = 'Updated: ' + now.toLocaleTimeString();
+  } catch (err) {
+    if (err.message === 'session expired') return;
+    if (Object.keys(cryptoData).length > 0) return; // silent fail — keep showing last good prices
+    document.getElementById('crypto-last-update').textContent = 'Error: ' + err.message;
+  }
+}
+
+function renderCryptoPrices() {
+  const grid = document.getElementById('crypto-grid');
+  grid.innerHTML = '';
+  COINS.forEach((coin, i) => {
+    const d = cryptoData[coin.id];
+    const card = document.createElement('div');
+    card.className = 'crypto-card';
+    const price     = d ? '$' + formatPrice(d.usd) : 'N/A';
+    const change    = d ? d.usd_24h_change : null;
+    const changeTxt = change != null ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '';
+    const changeCls = change != null ? (change >= 0 ? 'up' : 'down') : '';
+    const sym  = d ? d.symbol  : coin.symbol;
+    const name = d ? d.name    : coin.name;
+
+    card.innerHTML =
+      '<button class="crypto-remove" title="Remove">\u2715</button>' +
+      '<div class="crypto-header">' +
+      '<span class="crypto-symbol">' + escHtml(sym) + '</span>' +
+      '<span class="crypto-name">' + escHtml(name) + '</span>' +
+      '</div>' +
+      '<div class="crypto-price">' + price + '</div>' +
+      (changeTxt ? '<div class="crypto-change ' + changeCls + '">' + changeTxt + ' 24h</div>' : '');
+
+    // Sparkline
+    const prices = sparklineData[coin.id];
+    if (prices && prices.length > 1) {
+      const svg = buildSparkline(prices, 80, 32, change >= 0 ? '#3fb950' : '#f85149');
+      card.appendChild(svg);
+    }
+
+    card.querySelector('.crypto-remove').addEventListener('click', () => removeCryptoCoin(i));
+    grid.appendChild(card);
+  });
+}
+
+function buildSparkline(prices, w, h, color) {
+  const ns  = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+  svg.classList.add('crypto-sparkline');
+
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const range = maxP - minP || 1;
+  const step  = w / (prices.length - 1);
+
+  const pts = prices.map((p, i) =>
+    (i * step).toFixed(1) + ',' + ((1 - (p - minP) / range) * (h - 4) + 2).toFixed(1)
+  ).join(' ');
+
+  const poly = document.createElementNS(ns, 'polyline');
+  poly.setAttribute('points', pts);
+  poly.setAttribute('fill', 'none');
+  poly.setAttribute('stroke', color);
+  poly.setAttribute('stroke-width', '1.5');
+  poly.setAttribute('stroke-linejoin', 'round');
+  poly.setAttribute('stroke-linecap', 'round');
+  svg.appendChild(poly);
+  return svg;
+}
+
+function removeCryptoCoin(idx) {
+  COINS.splice(idx, 1);
+  renderCryptoPrices();
+}
+
+function addCryptoCoin() {
+  const input  = document.getElementById('crypto-add-input');
+  const symbol = input.value.trim().toUpperCase().replace(/\s+/g, '');
+  if (!symbol) return;
+  if (COINS.find(c => c.symbol === symbol)) { input.value = ''; return; }
+  // id = lowercase symbol; used as the cryptoData key after symToId mapping
+  COINS.push({ id: symbol.toLowerCase(), symbol, name: symbol });
+  input.value = '';
+  fetchCryptoPrices();
+}
+
+function formatPrice(n) {
+  if (n == null) return 'N/A';
+  if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  if (n >= 1)    return n.toFixed(2);
+  return n.toFixed(6);
+}
+
+// ── Portfolio ──
+function addPortfolioEntry() {
+  const coinId = document.getElementById('port-coin').value.trim().toLowerCase();
+  const amount = parseFloat(document.getElementById('port-amount').value);
+  if (!coinId || isNaN(amount) || amount <= 0) return;
+  portfolio.push({ coinId, amount });
+  localStorage.setItem('fh-portfolio', JSON.stringify(portfolio));
+  document.getElementById('port-coin').value   = '';
+  document.getElementById('port-amount').value = '';
+  renderPortfolio();
+}
+
+function renderPortfolio() {
+  const container = document.getElementById('portfolio-entries');
+  const totalEl   = document.getElementById('portfolio-total');
+  container.innerHTML = '';
+  let total = 0;
+
+  portfolio.forEach((entry, i) => {
+    const price = cryptoData[entry.coinId] ? cryptoData[entry.coinId].usd : null;
+    const val   = price != null ? price * entry.amount : null;
+    if (val != null) total += val;
+    const row = document.createElement('div');
+    row.className = 'portfolio-entry';
+    row.innerHTML =
+      '<span>' + escHtml(entry.coinId) + ' x ' + entry.amount + '</span>' +
+      '<span>' + (val != null ? '$' + formatPrice(val) : 'N/A') + '</span>' +
+      '<button class="btn btn-danger btn-sm" onclick="removePortfolioEntry(' + i + ')">Del</button>';
+    container.appendChild(row);
+  });
+
+  totalEl.textContent = portfolio.length > 0 ? 'Total: $' + formatPrice(total) : '';
+}
+
+function removePortfolioEntry(i) {
+  portfolio.splice(i, 1);
+  localStorage.setItem('fh-portfolio', JSON.stringify(portfolio));
+  renderPortfolio();
+}
+
+// ── Price Alerts ──
+function addPriceAlert() {
+  const coinId    = document.getElementById('alert-coin').value.trim().toLowerCase();
+  const direction = document.getElementById('alert-dir').value;
+  const price     = parseFloat(document.getElementById('alert-price').value);
+  if (!coinId || isNaN(price)) return;
+  priceAlerts.push({ coinId, direction, price, triggered: false });
+  localStorage.setItem('fh-alerts', JSON.stringify(priceAlerts));
+  document.getElementById('alert-coin').value  = '';
+  document.getElementById('alert-price').value = '';
+  renderPriceAlerts();
+}
+
+function renderPriceAlerts() {
+  const container = document.getElementById('price-alerts-list');
+  container.innerHTML = '';
+  priceAlerts.forEach((alert, i) => {
+    const row = document.createElement('div');
+    row.className = 'alert-entry' + (alert.triggered ? ' alert-triggered' : '');
+    row.innerHTML =
+      '<span>' + escHtml(alert.coinId) + ' ' + alert.direction + ' $' + alert.price +
+      (alert.triggered ? ' [TRIGGERED]' : '') + '</span>' +
+      '<button class="btn btn-danger btn-sm" onclick="removePriceAlert(' + i + ')">Del</button>';
+    container.appendChild(row);
+  });
+}
+
+function checkPriceAlerts() {
+  let changed = false;
+  priceAlerts.forEach(alert => {
+    if (alert.triggered) return;
+    const d = cryptoData[alert.coinId];
+    if (!d) return;
+    const price = d.usd;
+    const hit = (alert.direction === 'above' && price >= alert.price) ||
+                (alert.direction === 'below' && price <= alert.price);
+    if (hit) {
+      alert.triggered = true;
+      changed = true;
+      showToast(alert.coinId.toUpperCase() + ' price ' + alert.direction + ' $' + alert.price + '!', 'toast-yellow');
+      soundAlert();
+    }
+  });
+  if (changed) {
+    localStorage.setItem('fh-alerts', JSON.stringify(priceAlerts));
+    renderPriceAlerts();
+  }
+}
+
+function removePriceAlert(i) {
+  priceAlerts.splice(i, 1);
+  localStorage.setItem('fh-alerts', JSON.stringify(priceAlerts));
+  renderPriceAlerts();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TOOLS CHECK
+// ════════════════════════════════════════════════════════════════════
+
+async function checkTools() {
+  const out = document.getElementById('tool-check-output');
+  out.style.display = 'block'; out.textContent = 'Checking tools...';
+  try {
+    const res  = await apiFetch('/check_tools');
+    const data = await res.json();
+    out.textContent = data.output || '(no output)';
+  } catch (err) {
+    out.textContent = 'Error: ' + err.message;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// MODAL
+// ════════════════════════════════════════════════════════════════════
+
+function closeModal() {
+  const overlay = document.getElementById('modal-overlay');
+  overlay.classList.remove('open');
+  const body = document.getElementById('modal-body');
+  // Reset modal body display to default
+  body.style.display = '';
+  body.style.padding = '';
+  body.style.overflow = '';
+}
+
+function closeModalOverlay(e) {
+  if (e && e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+// ════════════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════════════
+
+function formatSize(bytes) {
+  if (bytes < 1024)    return bytes + 'B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + 'K';
+  return (bytes / 1048576).toFixed(1) + 'M';
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════════════
+
+loadNotifSettings();
+createScan();       // Scan 1
+switchToScanTab(0); // start on Scan 1
+
+</script>
+</body>
+</html>

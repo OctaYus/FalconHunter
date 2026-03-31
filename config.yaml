@@ -2,7 +2,14 @@ telegram:
   token: "your_bot_token"
   chat_id: "your_chat_id"
 
+discord:
+  webhook_url: ""  # Discord webhook URL (optional)
+
+slack:
+  webhook_url: ""  # Slack incoming webhook URL (optional)
+
 cleanup:
+  enabled: true
   remove_empty_files: true
   remove_empty_dirs: true
 
@@ -11,3 +18,22 @@ ffuf:
   threads: 40
   timeout: 10
   match_codes: "200,204,301,302,307,401,403"
+
+nuclei:
+  rate_limit: 150      # requests per second
+  bulk_size: 25        # templates per host batch
+  concurrency: 10      # parallel template executions
+
+httpx:
+  rate_limit: 150      # requests per second
+  threads: 50
+  timeout: 10
+
+subfinder:
+  threads: 100
+  timeout: 30
+
+dirsearch:
+  wordlist: ""
+  threads: 25
+  extensions: "php,html,js,txt,json,xml,bak,zip"

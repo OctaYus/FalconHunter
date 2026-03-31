@@ -1,18 +1,10 @@
 ############################
 # Python
 ############################
-
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-logs.*
-log.*
-# C extensions
 *.so
-.claude
-test*
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -44,9 +36,8 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
-.pytest_cache/
 
-# Django / Flask / other frameworks (safe generics)
+# Django / Flask / other frameworks
 db.sqlite3
 instance/
 
@@ -61,15 +52,80 @@ dmypy.json
 .pytype/
 
 ############################
-# Environments
+# Environments & secrets
 ############################
 .env
+.env.*
+.env.local
+.env.production
+.env.staging
+!.env.example
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Secret / credential files
+secrets.json
+secrets.yaml
+secrets.yml
+credentials.json
+credentials.yaml
+credentials.yml
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.ppk
+*.asc
+*.gpg
+
+# API keys / tokens
+*.token
+.auth_token
+token.txt
+api_key*
+apikey*
+
+# AWS
+.aws/
+aws_credentials
+aws_config
+
+############################
+# Config with live credentials
+############################
+# config.yaml may contain Telegram token/chat_id — ignore local overrides
+config.local.yaml
+config.prod.yaml
+config.production.yaml
+
+############################
+# Web UI runtime / sensitive
+############################
+web_ui/.auth_token
+web_ui/.ui.pid
+web_ui/.ui.log
+web_ui/history.json
+web_ui/notes.json
+web_ui/profiles.json
+web_ui/schedules.json
+web_ui/settings.json
+web_ui/__pycache__/
+
+# Web UI scan result directories
+web_ui/hosts/
+web_ui/urls/
+web_ui/vuln/
+web_ui/screenshots/
 
 ############################
 # Logs & runtime
@@ -79,6 +135,41 @@ logs*
 logs/
 tmp/
 *.pid
+logs.*
+log.*
+
+############################
+# Scan results / target data (may contain sensitive recon data)
+############################
+scan_*/
+scan_results*/
+screenshots/
+output*/
+results/
+results_*/
+recon/
+recon_*/
+nuclei-output/
+nuclei_output/
+
+# Input target lists (may contain client/private scope)
+domains.txt
+subdomains.txt
+urls.txt
+targets.txt
+scope.txt
+hosts.txt
+ips.txt
+-
+
+# Friendly programs (local tool binaries)
+friendly_programs/
+
+############################
+# Test artefacts
+############################
+test*
+*.txt.bak
 
 ############################
 # IDE / Editor
@@ -94,3 +185,9 @@ tmp/
 ############################
 .DS_Store
 Thumbs.db
+desktop.ini
+
+############################
+# Claude Code
+############################
+.claude

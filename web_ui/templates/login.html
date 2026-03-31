@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FalconHunter — Login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0e13;
+      --surface:   #0f1620;
+      --border:    #1e2a38;
+      --green:     #00cc6a;
+      --red:       #e05252;
+      --text:      #b0bcc9;
+      --text-dim:  #4a5568;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 36px 32px 32px;
+    }
+
+    .logo {
+      margin-bottom: 28px;
+    }
+
+    .logo-title {
+      font-size: 16px;
+      font-weight: bold;
+      color: var(--green);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    .logo-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      letter-spacing: 1px;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 0 0 24px;
+    }
+
+    label {
+      display: block;
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .input-wrap {
+      position: relative;
+      margin-bottom: 16px;
+    }
+
+    input[type="password"],
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 40px 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus {
+      border-color: var(--green);
+    }
+
+    .toggle-vis {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0;
+      transition: color 0.15s;
+    }
+
+    .toggle-vis:hover { color: var(--text); }
+
+    .btn-login {
+      width: 100%;
+      padding: 11px;
+      background: var(--green);
+      border: none;
+      border-radius: 5px;
+      color: #0a0e13;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .btn-login:hover { opacity: 0.85; }
+    .btn-login:active { opacity: 0.7; }
+
+    .error-msg {
+      background: rgba(224, 82, 82, 0.08);
+      border: 1px solid rgba(224, 82, 82, 0.3);
+      border-radius: 5px;
+      color: var(--red);
+      font-size: 12px;
+      padding: 9px 12px;
+      margin-bottom: 16px;
+    }
+
+    .hint {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 18px;
+      line-height: 1.6;
+    }
+
+    .hint code {
+      color: var(--green);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="logo-title">FalconHunter</div>
+      <div class="logo-sub">Web UI &middot; Secure Access</div>
+    </div>
+    <div class="divider"></div>
+
+    {% if error %}
+    <div class="error-msg">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST">
+      <label for="token">Access Token</label>
+      <div class="input-wrap">
+        <input type="password" id="token" name="token"
+               placeholder="Enter your token..." autofocus
+               autocomplete="current-password" />
+        <button type="button" class="toggle-vis" onclick="toggleVis()" title="Show/hide">&#9673;</button>
+      </div>
+      <button type="submit" class="btn-login">Authenticate</button>
+    </form>
+
+    <div class="hint">
+      Token is printed in the terminal on startup.<br>
+      Or read <code>web_ui/.auth_token</code> on the server.
+    </div>
+  </div>
+
+  <script>
+    function toggleVis() {
+      const inp = document.getElementById('token');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+  </script>
+</body>
+</html>

@@ -4,3 +4,4 @@ botocore==1.34.105
 tqdm==4.66.4
 dnspython==2.6.1
 PyYAML==6.0.1
+flask>=3.0.0
