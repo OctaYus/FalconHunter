@@ -21,7 +21,7 @@ logging_config = {
             "encoding": "utf-8",
             "filename": "logs.log",
             "mode": "a",
-            "level": "DEBUG",
+            "level": "INFO",
         }
     },
     "loggers": {

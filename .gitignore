@@ -103,7 +103,8 @@ aws_config
 ############################
 # Config with live credentials
 ############################
-# config.yaml may contain Telegram token/chat_id — ignore local overrides
+# config.yaml contains live webhooks/tokens — never commit it
+config.yaml
 config.local.yaml
 config.prod.yaml
 config.production.yaml
@@ -143,6 +144,7 @@ log.*
 ############################
 scan_*/
 scan_results*/
+scan_test_*/
 screenshots/
 output*/
 results/
@@ -151,6 +153,11 @@ recon/
 recon_*/
 nuclei-output/
 nuclei_output/
+shopify-resulys/
+*-resulys/
+*-results/
+*_results/
+*_output/
 
 # Input target lists (may contain client/private scope)
 domains.txt
@@ -160,7 +167,9 @@ targets.txt
 scope.txt
 hosts.txt
 ips.txt
--
+bugcrowd_all_targets.txt
+*_targets.txt
+*_scope.txt
 
 # Friendly programs (local tool binaries)
 friendly_programs/
@@ -168,7 +177,7 @@ friendly_programs/
 ############################
 # Test artefacts
 ############################
-test*
+test_out*/
 *.txt.bak
 
 ############################
@@ -191,3 +200,14 @@ desktop.ini
 # Claude Code
 ############################
 .claude
+
+############################
+# Local recon / client work directories
+############################
+genetec/
+genetec.txt
+genetec*/
+octa*/
+lucid/
+mantra/
+-

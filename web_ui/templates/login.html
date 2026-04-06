@@ -8,13 +8,15 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0a0e13;
-      --surface:   #0f1620;
-      --border:    #1e2a38;
-      --green:     #00cc6a;
-      --red:       #e05252;
-      --text:      #b0bcc9;
-      --text-dim:  #4a5568;
+      --bg:       #070b10;
+      --panel:    #0c1219;
+      --border:   #1a2535;
+      --green:    #00e676;
+      --green-dim:#00994d;
+      --red:      #ff5252;
+      --text:     #c9d6e3;
+      --dim:      #3a4a5c;
+      --dim2:     #6b7f96;
     }
 
     body {
@@ -25,166 +27,355 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
     }
 
+    /* ── animated grid background ── */
+    .bg-grid {
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,230,118,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,230,118,.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .bg-glow {
+      position: fixed;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0,230,118,.07) 0%, transparent 70%);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── card ── */
     .card {
+      position: relative;
+      z-index: 1;
       width: 100%;
-      max-width: 380px;
-      background: var(--surface);
+      max-width: 420px;
+      margin: 16px;
+      background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 36px 32px 32px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(0,230,118,.06), 0 32px 80px rgba(0,0,0,.6);
     }
 
-    .logo {
-      margin-bottom: 28px;
+    /* top accent bar */
+    .card-accent {
+      height: 3px;
+      background: linear-gradient(90deg, transparent, var(--green), var(--green-dim), transparent);
     }
 
-    .logo-title {
-      font-size: 16px;
+    .card-inner {
+      padding: 36px 36px 32px;
+    }
+
+    /* ── header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+
+    .falcon-icon {
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      background: rgba(0,230,118,.08);
+      border: 1px solid rgba(0,230,118,.2);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .falcon-icon svg {
+      width: 24px;
+      height: 24px;
+      fill: var(--green);
+    }
+
+    .header-text {}
+
+    .header-title {
+      font-size: 18px;
       font-weight: bold;
-      color: var(--green);
-      letter-spacing: 3px;
-      text-transform: uppercase;
-    }
-
-    .logo-sub {
-      font-size: 11px;
-      color: var(--text-dim);
-      margin-top: 4px;
+      color: #e8f0f8;
       letter-spacing: 1px;
     }
 
-    .divider {
-      height: 1px;
-      background: var(--border);
-      margin: 0 0 24px;
+    .header-title span { color: var(--green); }
+
+    .header-sub {
+      font-size: 10px;
+      color: var(--dim2);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-top: 3px;
     }
 
-    label {
-      display: block;
+    /* ── separator ── */
+    .sep {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .sep-line { flex: 1; height: 1px; background: var(--border); }
+    .sep-label {
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    /* ── form ── */
+    .field-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       font-size: 10px;
-      color: var(--text-dim);
       letter-spacing: 1.5px;
       text-transform: uppercase;
-      margin-bottom: 6px;
+      color: var(--dim2);
+      margin-bottom: 8px;
     }
+    .field-label svg { width: 11px; height: 11px; stroke: var(--dim2); fill: none; }
 
     .input-wrap {
       position: relative;
-      margin-bottom: 16px;
+      margin-bottom: 20px;
     }
 
     input[type="password"],
     input[type="text"] {
       width: 100%;
-      padding: 10px 40px 10px 12px;
+      padding: 12px 44px 12px 14px;
       background: var(--bg);
       border: 1px solid var(--border);
-      border-radius: 5px;
+      border-radius: 7px;
       color: var(--text);
       font-family: 'Courier New', monospace;
       font-size: 13px;
       outline: none;
-      transition: border-color 0.15s;
+      transition: border-color .2s, box-shadow .2s;
+      letter-spacing: 1px;
     }
 
     input:focus {
-      border-color: var(--green);
+      border-color: rgba(0,230,118,.5);
+      box-shadow: 0 0 0 3px rgba(0,230,118,.07);
+    }
+
+    input.error-state {
+      border-color: rgba(255,82,82,.5);
+      box-shadow: 0 0 0 3px rgba(255,82,82,.07);
     }
 
     .toggle-vis {
       position: absolute;
-      right: 10px;
+      right: 12px;
       top: 50%;
       transform: translateY(-50%);
       background: none;
       border: none;
-      color: var(--text-dim);
+      color: var(--dim);
       cursor: pointer;
-      font-size: 13px;
-      padding: 0;
-      transition: color 0.15s;
+      padding: 4px;
+      transition: color .15s;
+      display: flex;
+      align-items: center;
+    }
+    .toggle-vis:hover { color: var(--text); }
+    .toggle-vis svg { width: 16px; height: 16px; stroke: currentColor; fill: none; }
+
+    /* ── error ── */
+    .error-msg {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,82,82,.07);
+      border: 1px solid rgba(255,82,82,.25);
+      border-radius: 7px;
+      color: var(--red);
+      font-size: 12px;
+      padding: 10px 13px;
+      margin-bottom: 18px;
+      animation: shake .3s ease;
+    }
+    .error-msg svg { width: 14px; height: 14px; stroke: var(--red); fill: none; flex-shrink: 0; }
+
+    @keyframes shake {
+      0%,100%{ transform: translateX(0); }
+      25%     { transform: translateX(-5px); }
+      75%     { transform: translateX(5px); }
     }
 
-    .toggle-vis:hover { color: var(--text); }
-
+    /* ── button ── */
     .btn-login {
       width: 100%;
-      padding: 11px;
+      padding: 13px;
       background: var(--green);
       border: none;
-      border-radius: 5px;
-      color: #0a0e13;
+      border-radius: 7px;
+      color: #050a0e;
       font-family: 'Courier New', monospace;
       font-size: 12px;
       font-weight: bold;
-      letter-spacing: 2px;
+      letter-spacing: 2.5px;
       text-transform: uppercase;
       cursor: pointer;
-      transition: opacity 0.15s;
+      transition: opacity .15s, transform .1s, box-shadow .2s;
+      box-shadow: 0 4px 20px rgba(0,230,118,.2);
+      position: relative;
+      overflow: hidden;
     }
 
-    .btn-login:hover { opacity: 0.85; }
-    .btn-login:active { opacity: 0.7; }
-
-    .error-msg {
-      background: rgba(224, 82, 82, 0.08);
-      border: 1px solid rgba(224, 82, 82, 0.3);
-      border-radius: 5px;
-      color: var(--red);
-      font-size: 12px;
-      padding: 9px 12px;
-      margin-bottom: 16px;
+    .btn-login::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,.12) 0%, transparent 100%);
+      pointer-events: none;
     }
 
+    .btn-login:hover  { opacity: .9; box-shadow: 0 6px 28px rgba(0,230,118,.3); transform: translateY(-1px); }
+    .btn-login:active { opacity: .8; transform: translateY(0); }
+    .btn-login:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    /* ── footer hint ── */
     .hint {
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--dim);
+      line-height: 1.8;
       text-align: center;
-      font-size: 11px;
-      color: var(--text-dim);
-      margin-top: 18px;
-      line-height: 1.6;
+    }
+    .hint code {
+      color: var(--green-dim);
+      background: rgba(0,230,118,.06);
+      padding: 1px 5px;
+      border-radius: 3px;
     }
 
-    .hint code {
-      color: var(--green);
+    /* ── loading spinner on submit ── */
+    .spinner {
+      display: none;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(5,10,14,.4);
+      border-top-color: #050a0e;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      margin: 0 auto;
     }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
+  <div class="bg-grid"></div>
+  <div class="bg-glow"></div>
+
   <div class="card">
-    <div class="logo">
-      <div class="logo-title">FalconHunter</div>
-      <div class="logo-sub">Web UI &middot; Secure Access</div>
-    </div>
-    <div class="divider"></div>
+    <div class="card-accent"></div>
+    <div class="card-inner">
 
-    {% if error %}
-    <div class="error-msg">{{ error }}</div>
-    {% endif %}
-
-    <form method="POST">
-      <label for="token">Access Token</label>
-      <div class="input-wrap">
-        <input type="password" id="token" name="token"
-               placeholder="Enter your token..." autofocus
-               autocomplete="current-password" />
-        <button type="button" class="toggle-vis" onclick="toggleVis()" title="Show/hide">&#9673;</button>
+      <div class="header">
+        <div class="falcon-icon">
+          <!-- falcon / target icon -->
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-12c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+          </svg>
+        </div>
+        <div class="header-text">
+          <div class="header-title">Falcon<span>Hunter</span></div>
+          <div class="header-sub">Recon &amp; Vuln Scanner</div>
+        </div>
       </div>
-      <button type="submit" class="btn-login">Authenticate</button>
-    </form>
 
-    <div class="hint">
-      Token is printed in the terminal on startup.<br>
-      Or read <code>web_ui/.auth_token</code> on the server.
+      <div class="sep">
+        <div class="sep-line"></div>
+        <div class="sep-label">Secure Access</div>
+        <div class="sep-line"></div>
+      </div>
+
+      {% if error %}
+      <div class="error-msg">
+        <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="POST" id="login-form" onsubmit="handleSubmit()">
+        <div class="field-label">
+          <svg viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Access Token
+        </div>
+        <div class="input-wrap">
+          <input type="password" id="token" name="token"
+                 placeholder="Paste your access token..."
+                 autofocus autocomplete="current-password"
+                 class="{% if error %}error-state{% endif %}" />
+          <button type="button" class="toggle-vis" onclick="toggleVis()" title="Show / hide token">
+            <svg id="eye-icon" viewBox="0 0 24 24" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+
+        <button type="submit" class="btn-login" id="btn-submit">
+          <span id="btn-label">Authenticate</span>
+          <div class="spinner" id="spinner"></div>
+        </button>
+      </form>
+
+      <div class="hint">
+        Token is shown on server startup.<br>
+        Or read <code>web_ui/.auth_token</code> on the server.
+      </div>
+
     </div>
   </div>
 
   <script>
     function toggleVis() {
       const inp = document.getElementById('token');
-      inp.type = inp.type === 'password' ? 'text' : 'password';
+      const icon = document.getElementById('eye-icon');
+      if (inp.type === 'password') {
+        inp.type = 'text';
+        icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23" stroke-width="2"/>';
+      } else {
+        inp.type = 'password';
+        icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+      }
     }
+
+    function handleSubmit() {
+      const btn   = document.getElementById('btn-submit');
+      const label = document.getElementById('btn-label');
+      const spin  = document.getElementById('spinner');
+      btn.disabled   = true;
+      label.style.display = 'none';
+      spin.style.display  = 'block';
+    }
+
+    // Shake input if error present on load
+    {% if error %}
+    document.getElementById('token').focus();
+    {% endif %}
   </script>
 </body>
 </html>

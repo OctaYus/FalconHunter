@@ -23,21 +23,99 @@
    bash install.sh
    ```  
 
-## How to Use It 
+## Notification Setup (Telegram, Discord, Slack)
 
-Add your telegram bot API token to `config.yaml`:
+FalconHunter can send real-time alerts via Telegram, Discord, and Slack. Credentials are read from environment variables first, then from `config.yaml` as a fallback.
+
+### Option A — Environment Variables (Recommended)
+
+Keeps secrets off disk and out of version control.
+
+**For the current terminal session only** (lost when you close the terminal):
+```bash
+export TELEGRAM_TOKEN="7123456789:AAFxxx..."
+export TELEGRAM_CHAT_ID="123456789"
+export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+```
+
+**To make them permanent** (survive reboots and new terminal sessions):
+
+1. Open your shell config file:
+   ```bash
+   nano ~/.bashrc        # if you use bash
+   # or
+   nano ~/.zshrc         # if you use zsh
+   ```
+2. Add these lines at the bottom:
+   ```bash
+   export TELEGRAM_TOKEN="7123456789:AAFxxx..."
+   export TELEGRAM_CHAT_ID="123456789"
+   export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+   export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+   ```
+3. Save and apply the changes:
+   ```bash
+   source ~/.bashrc      # or source ~/.zshrc
+   ```
+4. Verify they are set:
+   ```bash
+   echo $TELEGRAM_TOKEN
+   echo $TELEGRAM_CHAT_ID
+   ```
+
+### Option B — config.yaml (Fine for local/private use)
+
+Edit `config.yaml` directly:
 
 ```yaml
 telegram:
   token: "your_bot_token"
   chat_id: "your_chat_id"
 
-cleanup:
-  remove_empty_files: true
-  remove_empty_dirs: true
+discord:
+  webhook_url: "https://discord.com/api/webhooks/..."
 
+slack:
+  webhook_url: "https://hooks.slack.com/services/..."
 ```
 
+> **Do not commit real tokens to git.** If you use Option B, add `config.yaml` to your `.gitignore` or keep the values empty and use env vars instead.
+
+### How to get your Telegram credentials
+
+**Step 1 — Create a bot and get the token**
+1. Open Telegram and search for `@BotFather`
+2. Send `/newbot`
+3. Give your bot a name (e.g. `FalconHunter Alerts`)
+4. Give your bot a username ending in `bot` (e.g. `falconhunter_bot`)
+5. BotFather replies with your token — looks like `7123456789:AAFxxx...`
+6. Copy that — that is your `TELEGRAM_TOKEN`
+
+**Step 2 — Get your chat ID**
+1. Search for your new bot in Telegram and press **Start** (or send it any message)
+2. Open this URL in your browser (replace `<YOUR_TOKEN>` with the token from Step 1):
+   ```
+   https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
+   ```
+3. Look for `"chat":{"id":` in the JSON response — the number after it is your `TELEGRAM_CHAT_ID`
+4. Example response:
+   ```json
+   {"message":{"chat":{"id": 123456789, "type":"private"}, ...}}
+   ```
+   So `TELEGRAM_CHAT_ID` would be `123456789`
+
+**Step 3 — Test it works**
+
+Run this in your terminal (replace the placeholders):
+```bash
+curl -s "https://api.telegram.org/bot<YOUR_TOKEN>/sendMessage?chat_id=<YOUR_CHAT_ID>&text=FalconHunter+connected"
+```
+If you get a JSON response with `"ok":true`, it's working.
+
+---
+
+## How to Use It
 
 Basic scan:  
 ```bash

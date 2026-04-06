@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import secrets
+import shlex
 import stat
 import subprocess
 import sys
@@ -44,8 +45,11 @@ def _load_config() -> dict:
     except Exception:
         return {}
 
-# scan_id -> { queue, running, output_dir, process }
+# scan_id -> { running, output_dir, process, log_file, ... }
 active_scans: dict = {}
+
+# Persist running scan metadata so the server can recover after restart
+ACTIVE_SCANS_PERSIST = "/tmp/falcon_active_scans.json"
 
 ANSI_ESCAPE = re.compile(r"\033\[[0-9;]*[mK]")
 
@@ -145,6 +149,11 @@ def safe_path(requested: str, fallback_base: str) -> "str | None":
     else:
         real = os.path.realpath(os.path.join(fallback_base, requested))
 
+    # Always allow paths within the application's own directory tree
+    _real_main = os.path.realpath(MAIN_DIR)
+    if real == _real_main or real.startswith(_real_main + "/"):
+        return real
+
     # Block if real path IS a sensitive dir or is INSIDE one
     # Example: real="/etc" → matches "/etc"; real="/etc/passwd" → matches "/etc/"
     for blocked in _BLOCKED_DIRS:
@@ -166,9 +175,69 @@ def is_safe_redirect(url: str) -> bool:
     return (not parsed.scheme) and (not parsed.netloc) and url.startswith("/")
 
 
+# ---------------------------------------------------------------------------
+# Input validation patterns
+# ---------------------------------------------------------------------------
+
+_EMAIL_RE  = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
+_SYMBOL_RE = re.compile(r'^[A-Z0-9]{2,10}$')   # Binance ticker symbols
+
+
+# ---------------------------------------------------------------------------
+# Real-IP helper (safe for proxied deployments)
+# ---------------------------------------------------------------------------
+
+def _get_real_ip() -> str:
+    """Return the real client IP.
+
+    Only trusts X-Forwarded-For when the TRUST_PROXY environment variable is
+    set to '1' / 'true' / 'yes' — prevents IP spoofing when the app is
+    reached directly (not behind a trusted reverse proxy).
+    """
+    if os.environ.get("TRUST_PROXY", "").lower() in ("1", "true", "yes"):
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            # Rightmost IP is set by the closest trusted proxy
+            return forwarded.split(",")[-1].strip()
+    return request.remote_addr or "unknown"
+
+
+# ---------------------------------------------------------------------------
+# CSRF protection (session-based token, checked via X-CSRF-Token header)
+# ---------------------------------------------------------------------------
+
+def _csrf_token() -> str:
+    """Return (and lazily create) the CSRF token for the current session."""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+
+def csrf_required(f):
+    """Decorator: reject state-changing requests that lack a valid CSRF token.
+
+    The JS client must include the session's CSRF token in the
+    ``X-CSRF-Token`` request header for every POST / DELETE call.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # If auth is disabled (localhost trusted mode) skip CSRF too
+        if AUTH_DISABLED:
+            return f(*args, **kwargs)
+        # Unauthenticated requests are rejected by login_required before us
+        if not session.get("authenticated"):
+            return f(*args, **kwargs)
+        sent     = request.headers.get("X-CSRF-Token", "")
+        expected = session.get("csrf_token", "")
+        if not sent or not expected or not hmac.compare_digest(sent, expected):
+            return jsonify({"error": "CSRF token missing or invalid"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 # Simple in-memory login rate limiter: max 10 attempts per IP per 60 s
 _login_attempts: dict = defaultdict(list)
-_RATE_LIMIT_MAX   = 10
+_RATE_LIMIT_MAX    = 10
 _RATE_LIMIT_WINDOW = 60  # seconds
 
 
@@ -262,7 +331,7 @@ def login():
         return redirect(url_for("index"))
     error = None
     if request.method == "POST":
-        ip = request.remote_addr or "unknown"
+        ip = _get_real_ip()
         if _is_rate_limited(ip):
             error = "Too many attempts. Wait 60 seconds and try again."
         else:
@@ -294,6 +363,13 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/csrf_token")
+@login_required
+def get_csrf_token():
+    """Return a CSRF token for the current session (used by the JS client)."""
+    return jsonify({"token": _csrf_token()})
+
+
 @app.route("/check_tools")
 @login_required
 def check_tools():
@@ -312,8 +388,101 @@ def check_tools():
         return jsonify({"output": f"Error: {e}"}), 500
 
 
+def _save_active_scans():
+    """Persist running scan metadata to disk so the server can recover after restart."""
+    data = {}
+    for sid, meta in list(active_scans.items()):
+        if meta.get("running"):
+            data[sid] = {
+                "scan_id":      sid,
+                "screen_name":  meta.get("screen_name", ""),
+                "log_file":     meta.get("log_file", ""),
+                "output_dir":   meta.get("output_dir", ""),
+                "domains_text": meta.get("domains_text", ""),
+                "started_at":   meta.get("started_at", ""),
+            }
+    try:
+        with open(ACTIVE_SCANS_PERSIST, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _restore_active_scans():
+    """On startup, re-attach to any scan that was running before a server restart."""
+    if not os.path.exists(ACTIVE_SCANS_PERSIST):
+        return
+    try:
+        with open(ACTIVE_SCANS_PERSIST) as f:
+            saved_scans = json.load(f)
+    except Exception:
+        return
+
+    ls = subprocess.run(["screen", "-ls"], capture_output=True, text=True)
+
+    for sid, saved in saved_scans.items():
+        screen_name = saved.get("screen_name", "")
+        log_file    = saved.get("log_file", "")
+
+        # Only restore if screen session is still alive and log file exists
+        if not screen_name or screen_name not in ls.stdout:
+            continue
+        if not log_file or not os.path.exists(log_file):
+            continue
+
+        meta = {
+            "running":      True,
+            "output_dir":   saved.get("output_dir", ""),
+            "domains_file": "",
+            "process":      None,
+            "screen_name":  screen_name,
+            "log_file":     log_file,
+            "domains_text": saved.get("domains_text", ""),
+            "started_at":   saved.get("started_at", ""),
+            "cmd":          [],
+        }
+        active_scans[sid] = meta
+
+        def _monitor_restored(scan_id=sid, scan_meta=meta, sname=screen_name, lfile=log_file):
+            final_status = "error"
+            try:
+                with open(lfile, "r", encoding="utf-8", errors="replace") as fh:
+                    while True:
+                        line = fh.readline()
+                        if line:
+                            if line.strip() == "__FALCON_DONE__":
+                                final_status = "done"
+                                break
+                        else:
+                            ls2 = subprocess.run(["screen", "-ls"], capture_output=True, text=True)
+                            if sname not in ls2.stdout:
+                                final_status = "done"
+                                break
+                            time.sleep(0.5)
+            except Exception:
+                pass
+            finally:
+                scan_meta["running"] = False
+                _save_active_scans()
+                history = load_json(HISTORY_FILE, [])
+                history.insert(0, {
+                    "id":         scan_id,
+                    "target":     scan_meta["domains_text"][:120],
+                    "output_dir": scan_meta["output_dir"],
+                    "status":     final_status,
+                    "started_at": scan_meta["started_at"],
+                    "ended_at":   datetime.now().isoformat(timespec="seconds"),
+                })
+                save_json(HISTORY_FILE, history[:200])
+
+        threading.Thread(target=_monitor_restored, daemon=True).start()
+
+    print(f"[falcon] Restored {len([s for s in saved_scans if s in active_scans])} running scan(s).")
+
+
 @app.route("/start_scan", methods=["POST"])
 @login_required
+@csrf_required
 def start_scan():
     data = request.get_json() or {}
 
@@ -334,9 +503,26 @@ def start_scan():
     run_xss             = bool(data.get("xss"))
     run_redirect        = bool(data.get("redirect"))
     run_secrets         = bool(data.get("secrets"))
+    run_waf             = bool(data.get("waf"))
+    run_screenshot      = bool(data.get("screenshot"))
+    run_params          = bool(data.get("params"))
+    run_lfi             = bool(data.get("lfi"))
+    run_all             = bool(data.get("run_all"))
+    skip_modules        = data.get("skip", "").strip()
+    resume              = bool(data.get("resume"))
 
     if not domains_text:
         return jsonify({"error": "No domains provided"}), 400
+
+    # Validate optional email before passing to subprocess
+    if email and not _EMAIL_RE.match(email):
+        return jsonify({"error": "Invalid email address"}), 400
+
+    # Validate paths — safe_path returns None if outside allowed dirs
+    if safe_path(output_dir, MAIN_DIR) is None:
+        return jsonify({"error": "Invalid output directory"}), 400
+    if safe_path(config_path, MAIN_DIR) is None:
+        return jsonify({"error": "Invalid config path"}), 400
 
     # Write domains to a temp file
     tmp = tempfile.NamedTemporaryFile(
@@ -383,47 +569,92 @@ def start_scan():
         cmd.append("--redirect")
     if run_secrets:
         cmd.append("--secrets")
+    if run_waf:
+        cmd.append("--waf")
+    if run_screenshot:
+        cmd.append("--screenshot")
+    if run_params:
+        cmd.append("--params")
+    if run_lfi:
+        cmd.append("--lfi")
+    if run_all:
+        cmd.append("--all")
+        if skip_modules:
+            cmd += ["--skip", skip_modules]
+    if resume:
+        cmd.append("--resume")
 
-    out_q: queue.Queue = queue.Queue()
+    screen_name = f"falcon_{scan_id[:8]}"
+    log_file    = f"/tmp/falcon_{scan_id}.log"
 
     scan_meta = {
-        "queue":        out_q,
         "running":      True,
         "output_dir":   output_dir,
         "domains_file": domains_file,
         "process":      None,
+        "screen_name":  screen_name,
+        "log_file":     log_file,
         "domains_text": domains_text,
         "started_at":   datetime.now().isoformat(timespec="seconds"),
+        "cmd":          cmd,
     }
     active_scans[scan_id] = scan_meta
+    _save_active_scans()
 
     def _run():
+        final_status = "error"
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                cwd=MAIN_DIR,
-                encoding="utf-8",
-                errors="replace",
-            )
+            # Pre-create the log file so stream clients never hit "file not found"
+            open(log_file, "w").close()
+
+            inner = " ".join(shlex.quote(c) for c in cmd)
+            screen_cmd = [
+                "screen", "-dmS", screen_name,
+                "bash", "-c",
+                f"{inner} 2>&1 | tee {shlex.quote(log_file)}; echo __FALCON_DONE__ >> {shlex.quote(log_file)}",
+            ]
+            proc = subprocess.Popen(screen_cmd, cwd=MAIN_DIR)
             scan_meta["process"] = proc
-            for line in proc.stdout:
-                out_q.put(strip_ansi(line))
-            proc.wait()
-            final_status = "done" if proc.returncode == 0 else "error"
+            proc.wait()  # returns almost immediately once screen detaches
+
+            # Monitor log file for completion sentinel
+            with open(log_file, "r", encoding="utf-8", errors="replace") as fh:
+                while True:
+                    line = fh.readline()
+                    if line:
+                        if line.strip() == "__FALCON_DONE__":
+                            final_status = "done"
+                            break
+                    else:
+                        ls = subprocess.run(
+                            ["screen", "-ls"], capture_output=True, text=True
+                        )
+                        if screen_name not in ls.stdout:
+                            final_status = "done"
+                            break
+                        time.sleep(0.5)
         except Exception as exc:
-            out_q.put(f"[ERROR] {exc}\n")
-            final_status = "error"
+            # Write error into log so stream clients see it
+            try:
+                with open(log_file, "a") as _ef:
+                    _ef.write(f"[ERROR] {exc}\n__FALCON_DONE__\n")
+            except Exception:
+                pass
         finally:
             scan_meta["running"] = False
-            out_q.put(None)  # sentinel
+            _save_active_scans()
             try:
                 os.unlink(domains_file)
             except OSError:
                 pass
+            # Keep log file alive for 1 hour so reconnecting clients can replay it
+            def _delayed_log_delete(path=log_file):
+                time.sleep(3600)
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            threading.Thread(target=_delayed_log_delete, daemon=True).start()
             # Save to history
             history = load_json(HISTORY_FILE, [])
             history.insert(0, {
@@ -434,9 +665,15 @@ def start_scan():
                 "started_at": scan_meta["started_at"],
                 "ended_at":   datetime.now().isoformat(timespec="seconds"),
             })
-            # Cap history at 200 entries
             history = history[:200]
             save_json(HISTORY_FILE, history)
+            # Prune completed scans — keep at most 50
+            completed = [sid for sid, m in list(active_scans.items()) if not m.get("running")]
+            for sid in completed[50:]:
+                active_scans.pop(sid, None)
+            completed_execs = [eid for eid, m in list(active_execs.items()) if not m.get("running")]
+            for eid in completed_execs[50:]:
+                active_execs.pop(eid, None)
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
@@ -448,46 +685,88 @@ def start_scan():
 @login_required
 def stream(scan_id):
     def _generate():
-        if scan_id not in active_scans:
+        meta = active_scans.get(scan_id)
+        if not meta:
             yield "data: {}\n\n".format(json.dumps({"line": "Scan not found.", "done": True}))
             return
 
-        meta = active_scans[scan_id]
-        q = meta["queue"]
+        log_file = meta["log_file"]
 
-        while True:
-            try:
-                line = q.get(timeout=25)
-            except queue.Empty:
-                yield "data: {}\n\n".format(json.dumps({"heartbeat": True}))
-                continue
-
-            if line is None:
-                yield "data: {}\n\n".format(json.dumps({"line": "", "done": True}))
+        # Wait up to 5 s for log file to be created
+        for _ in range(50):
+            if os.path.exists(log_file):
                 break
+            time.sleep(0.1)
 
-            yield "data: {}\n\n".format(json.dumps({"line": line}))
+        if not os.path.exists(log_file):
+            yield "data: {}\n\n".format(json.dumps({"line": "Log not available.", "done": True}))
+            return
+
+        # Tail log file from position 0 — any number of clients may do this
+        # simultaneously, and reconnects replay the full output automatically.
+        idle_ticks = 0
+        with open(log_file, "r", encoding="utf-8", errors="replace") as fh:
+            while True:
+                line = fh.readline()
+                if line:
+                    idle_ticks = 0
+                    if line.strip() == "__FALCON_DONE__":
+                        yield "data: {}\n\n".format(json.dumps({"line": "", "done": True}))
+                        return
+                    yield "data: {}\n\n".format(json.dumps({"line": strip_ansi(line)}))
+                else:
+                    if not meta.get("running"):
+                        yield "data: {}\n\n".format(json.dumps({"line": "", "done": True}))
+                        return
+                    idle_ticks += 1
+                    if idle_ticks % 100 == 0:   # heartbeat every ~20 s
+                        yield "data: {}\n\n".format(json.dumps({"heartbeat": True}))
+                    time.sleep(0.2)
 
     return Response(
         _generate(),
         mimetype="text/event-stream",
         headers={
-            "Cache-Control":   "no-cache",
+            "Cache-Control":     "no-cache",
             "X-Accel-Buffering": "no",
-            "Connection":      "keep-alive",
+            "Connection":        "keep-alive",
         },
     )
 
 
+@app.route("/active_scans")
+@login_required
+def get_active_scans():
+    """Return a list of currently running scans so the UI can re-attach after a reload."""
+    running = []
+    for sid, meta in list(active_scans.items()):
+        if meta.get("running"):
+            running.append({
+                "scan_id":      sid,
+                "output_dir":   meta.get("output_dir", ""),
+                "domains_text": meta.get("domains_text", "")[:120],
+                "started_at":   meta.get("started_at", ""),
+            })
+    return jsonify(running)
+
+
 @app.route("/stop_scan/<scan_id>", methods=["POST"])
 @login_required
+@csrf_required
 def stop_scan(scan_id):
     meta = active_scans.get(scan_id)
     if not meta:
         return jsonify({"error": "Scan not found"}), 404
     proc = meta.get("process")
-    if proc and meta["running"]:
-        proc.terminate()
+    if meta["running"]:
+        screen_name = meta.get("screen_name")
+        if screen_name:
+            subprocess.run(
+                ["screen", "-S", screen_name, "-X", "quit"],
+                capture_output=True,
+            )
+        elif proc:
+            proc.terminate()
         return jsonify({"status": "terminated"})
     return jsonify({"status": "not running"})
 
@@ -536,11 +815,19 @@ def read_file():
     if abs_path is None:
         return jsonify({"error": "Access denied: path outside allowed directories"}), 403
     try:
+        offset = int(request.args.get("offset", 0))
+        limit  = int(request.args.get("limit", 0))  # 0 = no limit
         with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
-        if len(content) > 512_000:
+            all_lines = fh.readlines()
+        total = len(all_lines)
+        if limit > 0:
+            page_lines = all_lines[offset:offset + limit]
+        else:
+            page_lines = all_lines[offset:]
+        content = "".join(page_lines)
+        if not limit and len(content) > 512_000:
             content = content[:512_000] + "\n\n[... truncated ...]"
-        return jsonify({"content": content})
+        return jsonify({"content": content, "total_lines": total, "offset": offset})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -550,6 +837,7 @@ active_execs: dict = {}
 
 @app.route("/exec", methods=["POST"])
 @login_required
+@csrf_required
 def execute_command():
     data = request.get_json() or {}
     cmd_str = data.get("command", "").strip()
@@ -563,8 +851,10 @@ def execute_command():
 
     def _run():
         try:
+            # Use explicit bash list form instead of shell=True to avoid
+            # implicit /bin/sh invocation; intentional shell for pipe/redirect support.
             proc = subprocess.Popen(
-                cmd_str, shell=True,
+                ["/bin/bash", "-c", cmd_str],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, cwd=MAIN_DIR,
                 encoding="utf-8", errors="replace",
@@ -611,6 +901,7 @@ def exec_stream_route(exec_id):
 
 @app.route("/kill_exec/<exec_id>", methods=["POST"])
 @login_required
+@csrf_required
 def kill_exec(exec_id):
     meta = active_execs.get(exec_id)
     if not meta:
@@ -633,6 +924,7 @@ def get_profiles():
 
 @app.route("/profiles", methods=["POST"])
 @login_required
+@csrf_required
 def create_profile():
     data = request.get_json() or {}
     name = data.get("name", "").strip()
@@ -652,6 +944,7 @@ def create_profile():
 
 @app.route("/profiles/<profile_id>", methods=["DELETE"])
 @login_required
+@csrf_required
 def delete_profile(profile_id):
     profiles = load_json(PROFILES_FILE, [])
     profiles = [p for p in profiles if p.get("id") != profile_id]
@@ -671,6 +964,7 @@ def get_history():
 
 @app.route("/history", methods=["DELETE"])
 @login_required
+@csrf_required
 def clear_history():
     save_json(HISTORY_FILE, [])
     return jsonify({"status": "cleared"})
@@ -678,6 +972,7 @@ def clear_history():
 
 @app.route("/history/<entry_id>", methods=["DELETE"])
 @login_required
+@csrf_required
 def delete_history_entry(entry_id):
     history = load_json(HISTORY_FILE, [])
     history = [h for h in history if h.get("id") != entry_id]
@@ -764,6 +1059,26 @@ def search_files():
 # Routes — Findings summary
 # ---------------------------------------------------------------------------
 
+@app.route("/summary")
+@login_required
+def scan_summary():
+    """Return summary.json written by main.py at end of scan, if it exists."""
+    output_dir = request.args.get("dir", "")
+    if not output_dir:
+        return jsonify({"error": "No dir specified"}), 400
+    abs_dir = safe_path(output_dir, MAIN_DIR)
+    if abs_dir is None:
+        return jsonify({"error": "Access denied"}), 403
+    summary_path = os.path.join(abs_dir, "summary.json")
+    if not os.path.isfile(summary_path):
+        return jsonify({"error": "summary.json not found"}), 404
+    try:
+        with open(summary_path, "r", encoding="utf-8") as fh:
+            return jsonify(json.load(fh))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/findings_summary")
 @login_required
 def findings_summary():
@@ -776,6 +1091,30 @@ def findings_summary():
         return jsonify({"error": "Access denied: path outside allowed directories"}), 403
     if not os.path.isdir(abs_dir):
         return jsonify({"error": "Directory not found"}), 404
+
+    # Prefer summary.json if present
+    summary_path = os.path.join(abs_dir, "summary.json")
+    if os.path.isfile(summary_path):
+        try:
+            with open(summary_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            # Normalise to the shape this endpoint always returns
+            return jsonify({
+                "files":      data.get("files", 0),
+                "lines":      data.get("lines", 0),
+                "urls":       data.get("urls", 0),
+                "ips":        data.get("ips", 0),
+                "subdomains": data.get("subdomains", data.get("subs", 0)),
+                "vulns":      data.get("vulns", 0),
+                "critical":   data.get("critical", 0),
+                "high":       data.get("high", 0),
+                "medium":     data.get("medium", 0),
+                "low":        data.get("low", 0),
+                "alive":      data.get("alive", 0),
+                "takeovers":  data.get("takeovers", 0),
+            })
+        except Exception:
+            pass  # fall through to regex walk
 
     file_count  = 0
     line_count  = 0
@@ -826,6 +1165,8 @@ def findings_summary():
         "high":       sev_high,
         "medium":     sev_medium,
         "low":        sev_low,
+        "alive":      0,
+        "takeovers":  0,
     })
 
 
@@ -932,6 +1273,7 @@ def get_notes():
 
 @app.route("/notes", methods=["POST"])
 @login_required
+@csrf_required
 def save_note():
     """Save a note for a scan. Body: {scan_id, text}."""
     data    = request.get_json() or {}
@@ -960,11 +1302,142 @@ def get_settings():
 
 @app.route("/settings", methods=["POST"])
 @login_required
+@csrf_required
 def save_settings():
     """Save user settings. Body is a flat object."""
     data = request.get_json() or {}
     save_json(SETTINGS_FILE, data)
     return jsonify({"status": "saved"})
+
+
+# ---------------------------------------------------------------------------
+# Routes — Notification config (Telegram / Discord / Slack)
+# ---------------------------------------------------------------------------
+
+@app.route("/scan_state")
+@login_required
+def get_scan_state():
+    """Return the checkpoint state for an output directory."""
+    output_dir = request.args.get("dir", "").strip()
+    if not output_dir:
+        return jsonify({"error": "dir required"}), 400
+    abs_dir = safe_path(MAIN_DIR, output_dir)
+    if abs_dir is None:
+        return jsonify({"error": "invalid path"}), 400
+    state_file = os.path.join(abs_dir, ".scan_state.json")
+    if not os.path.isfile(state_file):
+        return jsonify({"phases": [], "exists": False})
+    try:
+        with open(state_file, "r") as f:
+            data = json.load(f)
+        phases = [k for k, v in data.items() if v]
+        return jsonify({"phases": phases, "exists": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/notify_config", methods=["GET"])
+@login_required
+def get_notify_config():
+    """Return current notification credentials from config.yaml (masked)."""
+    cfg = _load_config()
+    tg  = cfg.get("telegram", {})
+    dc  = cfg.get("discord",  {})
+    sl  = cfg.get("slack",    {})
+    return jsonify({
+        "telegram_token":   tg.get("token",       ""),
+        "telegram_chat_id": tg.get("chat_id",      ""),
+        "discord_webhook":  dc.get("webhook_url",  ""),
+        "slack_webhook":    sl.get("webhook_url",  ""),
+        # surface whether env-var overrides are active
+        "env_telegram_token":   bool(os.environ.get("TELEGRAM_TOKEN",   "").strip()),
+        "env_telegram_chat_id": bool(os.environ.get("TELEGRAM_CHAT_ID", "").strip()),
+        "env_discord_webhook":  bool(os.environ.get("DISCORD_WEBHOOK_URL", "").strip()),
+        "env_slack_webhook":    bool(os.environ.get("SLACK_WEBHOOK_URL",   "").strip()),
+    })
+
+
+@app.route("/notify_config", methods=["POST"])
+@login_required
+@csrf_required
+def save_notify_config():
+    """Persist notification credentials into config.yaml."""
+    import yaml
+    data = request.get_json() or {}
+
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception:
+        cfg = {}
+
+    cfg.setdefault("telegram", {})
+    cfg.setdefault("discord",  {})
+    cfg.setdefault("slack",    {})
+
+    if "telegram_token" in data:
+        cfg["telegram"]["token"]        = data["telegram_token"].strip()
+    if "telegram_chat_id" in data:
+        cfg["telegram"]["chat_id"]      = data["telegram_chat_id"].strip()
+    if "discord_webhook" in data:
+        cfg["discord"]["webhook_url"]   = data["discord_webhook"].strip()
+    if "slack_webhook" in data:
+        cfg["slack"]["webhook_url"]     = data["slack_webhook"].strip()
+
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        return jsonify({"status": "saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/notify_test", methods=["POST"])
+@login_required
+@csrf_required
+def test_notification():
+    """Fire a test message to all configured channels."""
+    import yaml, requests as req_lib
+    data = request.get_json() or {}
+
+    token   = data.get("telegram_token",   "").strip() or os.environ.get("TELEGRAM_TOKEN",   "").strip()
+    chat_id = data.get("telegram_chat_id", "").strip() or os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    discord = data.get("discord_webhook",  "").strip() or os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+    slack   = data.get("slack_webhook",    "").strip() or os.environ.get("SLACK_WEBHOOK_URL",   "").strip()
+
+    results = {}
+    msg = "FalconHunter — test notification ✓"
+
+    if token and chat_id:
+        try:
+            r = req_lib.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": msg}, timeout=8)
+            results["telegram"] = "ok" if r.ok else f"error {r.status_code}"
+        except Exception as e:
+            results["telegram"] = f"error: {e}"
+    else:
+        results["telegram"] = "not configured"
+
+    if discord:
+        try:
+            r = req_lib.post(discord, json={"content": msg}, timeout=8)
+            results["discord"] = "ok" if r.ok else f"error {r.status_code}"
+        except Exception as e:
+            results["discord"] = f"error: {e}"
+    else:
+        results["discord"] = "not configured"
+
+    if slack:
+        try:
+            r = req_lib.post(slack, json={"text": msg}, timeout=8)
+            results["slack"] = "ok" if r.ok else f"error {r.status_code}"
+        except Exception as e:
+            results["slack"] = f"error: {e}"
+    else:
+        results["slack"] = "not configured"
+
+    return jsonify(results)
 
 
 # ---------------------------------------------------------------------------
@@ -1003,12 +1476,13 @@ def _scheduler_loop():
                             tmp.close()
                             domains_file = tmp.name
                             scan_id = str(uuid.uuid4())
+                            extra_flags = sched.get("flags", [])
                             cmd = [
                                 sys.executable,
                                 os.path.join(MAIN_DIR, "main.py"),
                                 "-d", domains_file,
                                 "-o", output_dir,
-                            ]
+                            ] + [f for f in extra_flags if isinstance(f, str)]
                             out_q: queue.Queue = queue.Queue()
                             scan_meta = {
                                 "queue":        out_q,
@@ -1070,7 +1544,7 @@ def _scheduler_loop():
         except Exception:
             pass
 
-        time.sleep(30)
+        time.sleep(10)
 
 
 _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
@@ -1085,6 +1559,7 @@ def get_schedules():
 
 @app.route("/schedules", methods=["POST"])
 @login_required
+@csrf_required
 def create_schedule():
     data = request.get_json() or {}
     name = data.get("name", "").strip()
@@ -1109,6 +1584,7 @@ def create_schedule():
         "created_at":       datetime.now().isoformat(timespec="seconds"),
         "next_run":         next_run,
         "last_run":         None,
+        "flags":            data.get("flags", []),  # list of extra CLI flags to replay
     }
     schedules.append(sched)
     save_json(SCHEDULES_FILE, schedules)
@@ -1117,6 +1593,7 @@ def create_schedule():
 
 @app.route("/schedules/<sched_id>", methods=["DELETE"])
 @login_required
+@csrf_required
 def delete_schedule(sched_id):
     schedules = load_json(SCHEDULES_FILE, [])
     schedules = [s for s in schedules if s.get("id") != sched_id]
@@ -1126,6 +1603,7 @@ def delete_schedule(sched_id):
 
 @app.route("/schedules/<sched_id>/toggle", methods=["POST"])
 @login_required
+@csrf_required
 def toggle_schedule(sched_id):
     schedules = load_json(SCHEDULES_FILE, [])
     for sched in schedules:
@@ -1194,7 +1672,7 @@ def export_report():
                 lines.append("```")
             else:
                 with open(fpath, encoding="utf-8", errors="replace") as fh:
-                    content_lines = [l.rstrip() for l in fh][:500]  # cap at 500 lines
+                    content_lines = [l.rstrip() for l in fh][:2000]  # cap at 2000 lines
                 lines.append("```")
                 lines.extend(content_lines)
                 lines.append("```")
@@ -1273,7 +1751,12 @@ def crypto_prices():
         return jsonify(_crypto_cache["data"])
 
     try:
-        sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        if not sym_list or len(sym_list) > 30:
+            return jsonify({"error": "Between 1 and 30 symbols required"}), 400
+        invalid = [s for s in sym_list if not _SYMBOL_RE.match(s)]
+        if invalid:
+            return jsonify({"error": f"Invalid symbol(s): {', '.join(invalid)}"}), 400
         data = _binance_fetch(sym_list)
         _crypto_cache["data"] = data
         _crypto_cache["ts"] = now
@@ -1281,6 +1764,8 @@ def crypto_prices():
     except Exception as exc:
         return jsonify({"error": str(exc)}), 502
 
+
+_restore_active_scans()   # re-attach to any scan that survived a server restart
 
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=5000, threaded=True)
