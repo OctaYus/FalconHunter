@@ -150,8 +150,8 @@ class MakeDirectories:
                 "zone-transfer.txt",
             ]
             for f in hosts_files:
-                open(os.path.join(
-                    f"{self.output_file}/hosts/", f), "w").close()
+                with open(os.path.join(f"{self.output_file}/hosts/", f), "w"):
+                    pass
                 time.sleep(0.02)
                 logger.info(
                     f"{color.SKY_BLUE}[+] {f} File successfully created{color.END}"
@@ -172,7 +172,8 @@ class MakeDirectories:
                 "gf-redirect.txt",
             ]
             for u in urls_files:
-                open(os.path.join(f"{self.output_file}/urls/", u), "w").close()
+                with open(os.path.join(f"{self.output_file}/urls/", u), "w"):
+                    pass
                 time.sleep(0.02)
                 logger.info(
                     f"{color.SKY_BLUE}[+] {u} File successfully created{color.END}"
@@ -208,7 +209,8 @@ class MakeDirectories:
                 "params-arjun.txt",
             ]
             for v in vuln_files:
-                open(os.path.join(f"{self.output_file}/vuln/", v), "w").close()
+                with open(os.path.join(f"{self.output_file}/vuln/", v), "w"):
+                    pass
                 time.sleep(0.02)
                 logger.info(
                     f"{color.SKY_BLUE}[+] {v} File successfully created{color.END}"
@@ -849,7 +851,6 @@ class UrlFinder:
         self.js_output = f"{self.output_file}/urls/js-files.txt"
         self.leaked_docs = f"{self.output_file}/urls/leaked-docs.txt"
         self.mantra_output = f"{self.output_file}/urls/mantra_output.txt"
-        self.js_findings = f"{self.output_file}/urls/js-findings.txt"
 
     def _filter_urls_by_regex(self, urls_file, pattern_re, dest_file):
         """Filter lines from urls_file by regex (Python-based, Windows-safe, no grep). Append unique lines to dest_file via anew."""
@@ -958,19 +959,28 @@ class UrlFinder:
                     return ("urls", b"")
 
                 def _run_paramspider():
-                    params_out = f"{self.output_file}/urls/params.txt"
+                    tmp_dir = tempfile.mkdtemp()
                     try:
                         logger.info(f"{color.GREEN}(+) Running paramspider for parameter discovery{color.END}")
-                        p_ps = subprocess.run(
-                            ["paramspider", "-l", subdomains_file],
+                        # paramspider writes one file per domain into --output dir, not stdout
+                        subprocess.run(
+                            ["paramspider", "-l", subdomains_file, "--output", tmp_dir],
                             capture_output=True, timeout=600)
-                        return ("params", p_ps.stdout if p_ps.stdout and p_ps.stdout.strip() else b"")
+                        data = b""
+                        for fname in sorted(os.listdir(tmp_dir)):
+                            fpath = os.path.join(tmp_dir, fname)
+                            if os.path.isfile(fpath):
+                                with open(fpath, "rb") as fh:
+                                    data += fh.read()
+                        return ("params", data)
                     except FileNotFoundError:
                         logger.warning(f"{color.RED}(-) paramspider not found in PATH{color.END}")
                     except subprocess.TimeoutExpired:
                         logger.warning("paramspider timed out, skipping")
                     except Exception as e:
                         logger.debug(f"paramspider failed: {e}")
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
                     return ("params", b"")
 
                 logger.info(f"{color.GREEN}(+) Collecting URLs in parallel (waybackurls, gau, waymore, paramspider){color.END}")
@@ -2160,9 +2170,14 @@ def generate_summary(output_file: str, domains: str):
     summary["js_files"]          = _count_lines(f"{output_file}/urls/js-files.txt")
     summary["leaked_docs"]       = _count_lines(f"{output_file}/urls/leaked-docs.txt")
     summary["subdomain_takeovers"] = _count_json_list(f"{output_file}/vuln/takeovers.json")
-    summary["email_vuln_domains"]  = sum(
-        1 for r in (json.load(open(f"{output_file}/vuln/missing-dmarc.json")) if
-                    os.path.isfile(f"{output_file}/vuln/missing-dmarc.json") else [])
+    dmarc_path = f"{output_file}/vuln/missing-dmarc.json"
+    if os.path.isfile(dmarc_path):
+        with open(dmarc_path, "r", encoding="utf-8") as _f:
+            _dmarc_data = json.load(_f)
+    else:
+        _dmarc_data = []
+    summary["email_vuln_domains"] = sum(
+        1 for r in _dmarc_data
         if isinstance(r, dict) and r.get("status") == "Vulnerable"
     )
 

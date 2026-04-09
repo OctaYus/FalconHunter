@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from urllib.parse import urlparse
 
-from flask import (Flask, Response, jsonify, redirect, render_template,
+from flask import (Flask, Response, g, jsonify, redirect, render_template,
                    request, send_file, session, url_for)
 
 app = Flask(__name__)
@@ -253,21 +253,42 @@ def _is_rate_limited(ip: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Per-request CSP nonce
+# ---------------------------------------------------------------------------
+
+@app.before_request
+def _assign_csp_nonce():
+    g.csp_nonce = secrets.token_urlsafe(16)
+
+
+@app.context_processor
+def _inject_csp_nonce():
+    return {"csp_nonce": g.get("csp_nonce", "")}
+
+
+# ---------------------------------------------------------------------------
 # Security headers — applied to every response
 # ---------------------------------------------------------------------------
 
 @app.after_request
 def set_security_headers(response):
+    nonce = g.get("csp_nonce", "")
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"]        = "DENY"
     response.headers["Referrer-Policy"]        = "no-referrer"
+    # 'unsafe-inline' is retained as a fallback for inline event handlers
+    # (onclick etc.) in browsers that do not support CSP3.  In CSP3-capable
+    # browsers the nonce takes precedence for <script> blocks, which means
+    # 'unsafe-inline' is effectively ignored for those elements.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
+        f"script-src 'self' 'nonce-{nonce}' 'unsafe-inline' "
+        "https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' "
+        "https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
         "img-src 'self' data: blob:; "
         "connect-src 'self'; "
-        "font-src 'self' data:; "
+        "font-src 'self' data: https://fonts.gstatic.com; "
         "object-src 'none'; "
         "base-uri 'self';"
     )
@@ -844,6 +865,13 @@ def execute_command():
     if not cmd_str:
         return jsonify({"error": "No command provided"}), 400
 
+    ip = _get_real_ip()
+    print(
+        f"[falcon] EXEC [{datetime.now().isoformat(timespec='seconds')}] "
+        f"ip={ip} cmd={cmd_str!r}",
+        flush=True,
+    )
+
     exec_id = str(uuid.uuid4())
     out_q: queue.Queue = queue.Queue()
     exec_meta = {"queue": out_q, "running": True, "process": None}
@@ -851,8 +879,7 @@ def execute_command():
 
     def _run():
         try:
-            # Use explicit bash list form instead of shell=True to avoid
-            # implicit /bin/sh invocation; intentional shell for pipe/redirect support.
+            # Intentional shell: supports pipes, redirects, and chaining.
             proc = subprocess.Popen(
                 ["/bin/bash", "-c", cmd_str],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
