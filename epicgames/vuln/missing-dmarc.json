@@ -1,0 +1,658 @@
+[
+    {
+        "domain": "wonderboxdev.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "wonderboxapi.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "v1staging.kidswebservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "kidswebservices.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "twinmotion.unrealengine.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "staging.kidswebservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "niantic.kidswebservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "metahuman.unrealengine.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "innersloth.kidswebservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "fngw-svc-gc-livefn.ol.epicgames.net",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "fngw-svc-ds-livefn.ol.epicgames.net",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "fn-commerce-live.eeef.live.use1a.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "communities.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "urc-uefn.live.ucs.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "urc-uefn.livetesting.ucs.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "urc-auth-uefn.live.ucs.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "nexus.live.ucs.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "hmxservices.com",
+        "spf_valid": true,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "help.sketchfab.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "hc2tooling.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "hc2services.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "harmonixmusic.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "forum.sketchfab.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "fortnite.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "fab.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "dev.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "create.fortnite.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "cosmo.fdeb.live.use1a.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "content-service.bfda.live.use1a.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "content-service-live-testing.bfda.live.use1a.on.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "competitive.fortnite.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "capturingreality.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "selector1",
+        "status": "Valid"
+    },
+    {
+        "domain": "buckingfuggy.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "aquiristech.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "aqtooling.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "unrealtournament.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "unrealengine.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "twinmotion.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "sketchfab.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "singspacegame.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "rocketleague.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "quixel.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "psyonix.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "psynet.gg",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "oncatapult.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "mediatonic.co.uk",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "hmxwebservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "epicgames.dev",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "epicgames.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "easy.ac",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "dropmix.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "dancecentral.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "cubicmotion.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "audicagame.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "artstation.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "amplitude-game.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "3lateral.com",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "playwonderbox.com.br",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "playwonderbox.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "horizonchaseturbo.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "horizonchase.com.br",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "horizonchase.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "ballistic.com.br",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "ballistic.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "aquiris.studio",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "aquiris.com.br",
+        "spf_valid": true,
+        "dmarc_valid": true,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Valid"
+    },
+    {
+        "domain": "fallguys.com",
+        "spf_valid": true,
+        "dmarc_valid": false,
+        "dkim_valid": true,
+        "dkim_selector": "google",
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "www-api.hmxservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "webinars.unrealengine.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "web-admin.harmonixmusic.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "watch.fortnite.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "vimeo.aquiris.com.br",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "unrealfest.unrealengine.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "udn.unrealengine.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "twinmotionhelp.epicgames.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "teamcity.hmxservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "teamcity-external.harmonixmusic.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "tableau.harmonixmusic.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "swarm.harmonixmusic.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "swarm-monitoring-node-01.hmxservices.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "support.harmonixmusic.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    },
+    {
+        "domain": "support.capturingreality.com",
+        "spf_valid": false,
+        "dmarc_valid": false,
+        "dkim_valid": false,
+        "dkim_selector": null,
+        "status": "Vulnerable"
+    }
+]

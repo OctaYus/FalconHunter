@@ -13,8 +13,11 @@ from urllib.parse import urlparse
 import logging
 import logging_config
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from tqdm import tqdm
 import dns.resolver
 import dns.zone

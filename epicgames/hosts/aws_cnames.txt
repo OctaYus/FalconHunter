@@ -1,0 +1,9 @@
+s3-website.us-east-1.amazonaws.com
+hmxcorp-prod.s3.harmonixmusic.com.s3-website-us-east-1.amazonaws.com
+hmxcorp-prod-a.s3.harmonixmusic.com.s3-website-us-east-1.amazonaws.com
+confluencedb.cluster-cs36hayyxu00.us-east-1.rds.amazonaws.com
+jiradb.cluster-cs36hayyxu00.us-east-1.rds.amazonaws.com
+licensee-mgmt-portal.cluster-cs36hayyxu00.us-east-1.rds.amazonaws.com
+stork.cluster-cs36hayyxu00.us-east-1.rds.amazonaws.com
+sda.cluster-cs36hayyxu00.us-east-1.rds.amazonaws.com
+approval-bot.cluster-cs36hayyxu00.us-east-1.rds.amazonaws.com
