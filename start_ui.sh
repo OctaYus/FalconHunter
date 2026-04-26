@@ -139,7 +139,7 @@ _write_portproxy_script() {
     local port="$2"
 
     # Windows Desktop path from WSL
-    local desktop="/mnt/c/Users/OctaYus/Desktop"
+    local desktop="/mnt/c/Users/$(cmd.exe /c echo %USERNAME% 2>/dev/null | tr -d '\r\n' || echo '1myou')/Desktop"
     local script="$desktop/FalconHunter-Setup-Portproxy.ps1"
 
     cat > "$script" << PSEOF

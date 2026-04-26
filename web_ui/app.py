@@ -6,6 +6,7 @@ import queue
 import re
 import secrets
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -276,13 +277,13 @@ def set_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"]        = "DENY"
     response.headers["Referrer-Policy"]        = "no-referrer"
-    # 'unsafe-inline' is retained as a fallback for inline event handlers
-    # (onclick etc.) in browsers that do not support CSP3.  In CSP3-capable
-    # browsers the nonce takes precedence for <script> blocks, which means
-    # 'unsafe-inline' is effectively ignored for those elements.
+    # Nonce is NOT included in script-src: per CSP3, a nonce in script-src
+    # silently disables 'unsafe-inline' for ALL inline code including onclick
+    # handlers. Since this UI depends on inline handlers, we rely on
+    # 'unsafe-inline' alone (acceptable for a localhost security tool).
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        f"script-src 'self' 'nonce-{nonce}' 'unsafe-inline' "
+        "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
@@ -439,15 +440,21 @@ def _restore_active_scans():
     except Exception:
         return
 
-    ls = subprocess.run(["screen", "-ls"], capture_output=True, text=True)
+    _has_screen = bool(shutil.which("screen"))
+    ls_stdout = ""
+    if _has_screen:
+        ls = subprocess.run(["screen", "-ls"], capture_output=True, text=True)
+        ls_stdout = ls.stdout
 
     for sid, saved in saved_scans.items():
         screen_name = saved.get("screen_name", "")
         log_file    = saved.get("log_file", "")
 
-        # Only restore if screen session is still alive and log file exists
-        if not screen_name or screen_name not in ls.stdout:
+        # Only restore screen-based scans when screen is available
+        if _has_screen and (not screen_name or screen_name not in ls_stdout):
             continue
+        if not _has_screen:
+            continue  # can't restore screen sessions without screen
         if not log_file or not os.path.exists(log_file):
             continue
 
@@ -628,32 +635,53 @@ def start_scan():
             # Pre-create the log file so stream clients never hit "file not found"
             open(log_file, "w").close()
 
-            inner = " ".join(shlex.quote(c) for c in cmd)
-            screen_cmd = [
-                "screen", "-dmS", screen_name,
-                "bash", "-c",
-                f"{inner} 2>&1 | tee {shlex.quote(log_file)}; echo __FALCON_DONE__ >> {shlex.quote(log_file)}",
-            ]
-            proc = subprocess.Popen(screen_cmd, cwd=MAIN_DIR)
-            scan_meta["process"] = proc
-            proc.wait()  # returns almost immediately once screen detaches
+            if shutil.which("screen"):
+                # Preferred: detached screen session — survives server restarts
+                inner = " ".join(shlex.quote(c) for c in cmd)
+                screen_cmd = [
+                    "screen", "-dmS", screen_name,
+                    "bash", "-c",
+                    f"{inner} 2>&1 | tee {shlex.quote(log_file)}; echo __FALCON_DONE__ >> {shlex.quote(log_file)}",
+                ]
+                proc = subprocess.Popen(screen_cmd, cwd=MAIN_DIR)
+                scan_meta["process"] = proc
+                proc.wait()  # returns almost immediately once screen detaches
 
-            # Monitor log file for completion sentinel
-            with open(log_file, "r", encoding="utf-8", errors="replace") as fh:
-                while True:
-                    line = fh.readline()
-                    if line:
-                        if line.strip() == "__FALCON_DONE__":
-                            final_status = "done"
-                            break
-                    else:
-                        ls = subprocess.run(
-                            ["screen", "-ls"], capture_output=True, text=True
-                        )
-                        if screen_name not in ls.stdout:
-                            final_status = "done"
-                            break
-                        time.sleep(0.5)
+                # Monitor log file for completion sentinel
+                with open(log_file, "r", encoding="utf-8", errors="replace") as fh:
+                    while True:
+                        line = fh.readline()
+                        if line:
+                            if line.strip() == "__FALCON_DONE__":
+                                final_status = "done"
+                                break
+                        else:
+                            ls = subprocess.run(
+                                ["screen", "-ls"], capture_output=True, text=True
+                            )
+                            if screen_name not in ls.stdout:
+                                final_status = "done"
+                                break
+                            time.sleep(0.5)
+            else:
+                # Fallback: run directly and tee output to log file.
+                # Clear screen_name so stop_scan falls through to proc.terminate().
+                scan_meta["screen_name"] = ""
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1, cwd=MAIN_DIR,
+                    encoding="utf-8", errors="replace",
+                )
+                scan_meta["process"] = proc
+                with open(log_file, "a", encoding="utf-8") as lf:
+                    for line in proc.stdout:
+                        lf.write(line)
+                        lf.flush()
+                proc.wait()
+                final_status = "done" if proc.returncode == 0 else "error"
+                with open(log_file, "a", encoding="utf-8") as lf:
+                    lf.write("__FALCON_DONE__\n")
         except Exception as exc:
             # Write error into log so stream clients see it
             try:
@@ -781,7 +809,7 @@ def stop_scan(scan_id):
     proc = meta.get("process")
     if meta["running"]:
         screen_name = meta.get("screen_name")
-        if screen_name:
+        if screen_name and shutil.which("screen"):
             subprocess.run(
                 ["screen", "-S", screen_name, "-X", "quit"],
                 capture_output=True,
@@ -1348,7 +1376,7 @@ def get_scan_state():
     output_dir = request.args.get("dir", "").strip()
     if not output_dir:
         return jsonify({"error": "dir required"}), 400
-    abs_dir = safe_path(MAIN_DIR, output_dir)
+    abs_dir = safe_path(output_dir, MAIN_DIR)
     if abs_dir is None:
         return jsonify({"error": "invalid path"}), 400
     state_file = os.path.join(abs_dir, ".scan_state.json")

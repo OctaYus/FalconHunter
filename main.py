@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import logging
 import logging_config
 import requests
+from urllib.parse import parse_qs, urlencode, urlunparse
 import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -253,7 +254,8 @@ class SubdomainsCollector:
         try:
             if shutil.which("amass"):
                 logger.info(f"{color.GREEN}(+) Subdomain enumeration (amass passive){color.END}")
-                amass_tmp = tempfile.mktemp(suffix=".txt")
+                _amass_fd, amass_tmp = tempfile.mkstemp(suffix=".txt")
+                os.close(_amass_fd)
                 try:
                     p = subprocess.run(
                         ["amass", "enum", "-passive", "-nocolor",
@@ -728,9 +730,11 @@ class BucketFinder:
                 return
             aws_cmd = ["aws_extractor", "-u", urls_file,
                        "-test-takeover", "-o", output_file]
-            subprocess.run(aws_cmd)
+            subprocess.run(aws_cmd, capture_output=True, timeout=900)
         except FileNotFoundError:
             logger.warning(f"{color.RED}(-) aws_extractor not found in PATH{color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) aws_extractor timed out{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error Occurred: {e}{color.END}")
 
@@ -892,7 +896,7 @@ class UrlFinder:
                 "-fx",   # extract form action targets
                 "-o", urls,
             ]
-            subprocess.run(katana_cmd, check=True)
+            subprocess.run(katana_cmd, check=True, timeout=1800)
         except FileNotFoundError:
             logger.warning(
                 f"{color.RED}(-) katana not found in PATH{color.END}")
@@ -1832,8 +1836,6 @@ class LFIScanner:
     def _inject(self, url: str, payload: str) -> str | None:
         """Replace every parameter value in *url* with *payload* and return
         the first URL variant that triggers a success signature, or None."""
-        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-
         parsed = urlparse(url)
         qs = parse_qs(parsed.query, keep_blank_values=True)
         if not qs:
@@ -2085,32 +2087,49 @@ def load_config(config_path="config.yaml"):
 
 
 def check_tools():
-    """Check for required and optional CLI tools in PATH. Required: subfinder, httpx, waybackurls, anew. Optional: gau, gf, cnfinder, BadAuth0, mantra, nuclei, subjack, subzy, s3scanner."""
+    """Check required and optional CLI tools."""
     required = ["subfinder", "httpx", "waybackurls", "anew"]
-    optional = ["gau", "gf", "cnfinder", "BadAuth0",
-                "mantra", "nuclei", "subzy", "s3scanner", "ffuf",
-                "corsy", "crlfuzz", "dirsearch", "bypass-403", "kr",
-                "dalfox", "openredirex", "secretfinder", "trufflehog",
-                "amass", "dnsx", "waymore",
-                "wafw00f", "gowitness", "arjun"]
+    optional = [
+        "gau", "gf", "cnfinder", "BadAuth0", "mantra", "katana",
+        "nuclei", "subjack", "subzy", "s3scanner", "aws_extractor", "ffuf",
+        "corsy", "crlfuzz", "dirsearch", "bypass-403", "kr",
+        "dalfox", "openredirex", "paramspider", "secretfinder",
+        "trufflehog", "gitleaks", "amass", "dnsx", "waymore",
+        "wafw00f", "gowitness", "arjun", "qsreplace",
+    ]
+
     # Use find_go_bin so Go tools in ~/go/bin are found even when shadowed by
     # Python shims (e.g. the pip-installed httpx CLI).
     def _found(name):
         p = find_go_bin(name)
         return os.path.isfile(p) if os.path.isabs(p) else bool(shutil.which(p))
-    missing_required = [n for n in required if not _found(n)]
-    missing_optional = [n for n in optional if not _found(n)]
+
+    print("\n=== Required Tools ===")
+    missing_required = []
+    for name in required:
+        if _found(name):
+            print(f"  [+] {name}")
+        else:
+            print(f"  [!] {name}  MISSING")
+            missing_required.append(name)
+
+    print("\n=== Optional Tools ===")
+    missing_optional = []
+    for name in optional:
+        if _found(name):
+            print(f"  [+] {name}")
+        else:
+            print(f"  [-] {name}  not found")
+            missing_optional.append(name)
+
+    print()
     if missing_required:
-        logger.warning(
-            f"{color.RED}(!) Missing required tools (add to PATH): {', '.join(missing_required)}{color.END}"
-        )
-    if missing_optional:
-        logger.info(
-            f"{color.SKY_BLUE}(i) Optional tools not in PATH: {', '.join(missing_optional)}{color.END}"
-        )
-    if not missing_required and not missing_optional:
-        logger.info(
-            f"{color.GREEN}(+) All checked tools found in PATH{color.END}")
+        print(f"[!] {len(missing_required)} required tool(s) missing — scans will fail: {', '.join(missing_required)}")
+    elif not missing_optional:
+        print("[+] All tools found.")
+    else:
+        print(f"[i] {len(missing_optional)} optional tool(s) not installed (modules using them will be skipped).")
+
     return len(missing_required) == 0
 
 
@@ -2354,11 +2373,11 @@ def main():
     )
     args = parser.parse_args()
 
-    print(banner)
-
     if args.check_tools:
         check_tools()
         return
+
+    print(banner)
 
     # --all: enable every optional module
     skip_set = {m.strip().lower() for m in (args.skip or "").split(",") if m.strip()}
@@ -2503,16 +2522,14 @@ def main():
         return subdomains_takeover
 
     def _run_buckets():
-        bucket_finder = BucketFinder(domains, output_file)
-        bucket_finder.buckets_cli()
+        _bucket_finder.buckets_cli()
         notifier.notify(telegram_token, telegram_chat_id, "(+) BucketFinder scan completed")
-        return bucket_finder
 
-    def _run_urls(bucket_finder):
+    def _run_urls():
         finder = UrlFinder(domains, output_file)
         finder.collect_urls()
         finder.extract_js_files()
-        bucket_finder.aws_extractor()
+        _bucket_finder.aws_extractor()
         finder.extract_documents()
         finder.extract_js_data_with_mantra()
         notifier.notify(telegram_token, telegram_chat_id, "(+) URL scan completed")
@@ -2528,7 +2545,6 @@ def main():
         except Exception:
             logger.exception(f"Failed during phase: {phase_name}")
 
-    # Takeovers + buckets share state so run together
     _bucket_finder = BucketFinder(domains, output_file)
     try:
         _phase("takeovers", _run_takeovers)
@@ -2536,12 +2552,12 @@ def main():
         logger.exception("Failed during takeover tests")
 
     try:
-        _phase("buckets", lambda: _run_buckets())
+        _phase("buckets", _run_buckets)
     except Exception:
         logger.exception("Failed during BucketFinder scan")
 
     try:
-        _phase("urls", lambda: _run_urls(_bucket_finder))
+        _phase("urls", _run_urls)
     except Exception:
         logger.exception("Failed during URL scan")
         notifier.notify(telegram_token, telegram_chat_id, "(-) URL scan failed")
@@ -2669,8 +2685,8 @@ def main():
             "(-) Web Application Vulnerability Scan failed to complete",
         )
     finally:
-        if _single_tmp and os.path.isfile(_single_tmp):
-            os.unlink(_single_tmp)
+        if _single_tmp and os.path.isfile(_single_tmp.name):
+            os.unlink(_single_tmp.name)
 
 
 if __name__ == "__main__":

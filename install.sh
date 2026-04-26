@@ -77,7 +77,7 @@ install_system_packages() {
        sudo apt-get install -y -qq \
            curl wget git python3 python3-pip python3-venv python3-virtualenv \
            make build-essential gcc cmake ruby whois zip libpcap-dev \
-           python3-dev libssl-dev libffi-dev pipx 2>&1 | tail -3; then
+           python3-dev libssl-dev libffi-dev pipx screen 2>&1 | tail -3; then
         ok "System packages ready"
     else
         err "apt install had errors — continuing anyway"
@@ -152,9 +152,11 @@ declare -A GO_TOOLS=(
   [subjack]="github.com/haccer/subjack@latest"
   [cnfinder]="github.com/OctaYus/cnfinder@latest"
   [aws_extractor]="github.com/OctaYus/aws_extractor@latest"
-  [amass]="github.com/owasp-amass/amass/v3/...@master"
+  [mantra]="github.com/MrEmpy/mantra@latest"
+  [amass]="github.com/owasp-amass/amass/v3/...@latest"
   [kr]="github.com/assetnote/kiterunner/cmd/kr@latest"
   [gowitness]="github.com/sensepost/gowitness@latest"
+  [trufflehog]="github.com/trufflesecurity/trufflehog/v3/cmd/trufflehog@latest"
 )
 
 install_go_tools() {
@@ -180,7 +182,7 @@ install_go_tools() {
                 warn "$tool built but binary not found at expected path"; mark_fail "$tool"
             fi
         else
-            cat /tmp/go_install_err | tail -3 | while read -r l; do warn "  $l"; done
+            tail -3 /tmp/go_install_err | while read -r l; do warn "  $l"; done
             mark_fail "$tool"
         fi
     done
@@ -191,7 +193,6 @@ declare -A PIPX_TOOLS=(
   [waymore]="waymore"
   [s3scanner]="s3scanner"
   [dirsearch]="dirsearch"
-  [trufflehog]="trufflehog"
   [wafw00f]="wafw00f"
   [arjun]="arjun"
 )
@@ -263,7 +264,7 @@ install_git_py_tools() {
 # ── 7. BadAuth0 (Go) ──────────────────────────
 install_badauth() {
     section "BadAuth0"
-    if is_installed "BadAuth0" && [[ "$FORCE" -eq 0 ]]; then
+    if is_installed "BadAuth0"; then
         mark_skip "BadAuth0"; return
     fi
     if ! command -v go &>/dev/null; then
@@ -280,7 +281,7 @@ install_badauth() {
             warn "BadAuth0 built but binary not found"; mark_fail "BadAuth0"
         fi
     else
-        cat /tmp/go_install_err | tail -3 | while read -r l; do warn "  $l"; done
+        tail -3 /tmp/go_install_err | while read -r l; do warn "  $l"; done
         mark_fail "BadAuth0"
     fi
 }
@@ -310,15 +311,13 @@ install_gitleaks() {
     local dest="$TOOLS_DIR/gitleaks"
     rm -rf "$dest"
     if git clone --depth 1 https://github.com/gitleaks/gitleaks.git "$dest" 2>/tmp/git_err; then
-        pushd "$dest" >/dev/null
-        if make build 2>/tmp/make_err; then
-            sudo cp -f ./gitleaks /usr/local/bin/
+        if ( cd "$dest" && make build 2>/tmp/make_err ); then
+            sudo cp -f "$dest/gitleaks" /usr/local/bin/
             mark_ok "gitleaks"
         else
             tail -3 /tmp/make_err | while read -r l; do warn "  $l"; done
             mark_fail "gitleaks"
         fi
-        popd >/dev/null
     else
         tail -2 /tmp/git_err | while read -r l; do warn "  $l"; done
         mark_fail "gitleaks"
