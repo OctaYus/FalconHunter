@@ -178,6 +178,8 @@ friendly_programs/
 # Test artefacts
 ############################
 test_out*/
+test/
+test.txt
 *.txt.bak
 
 ############################

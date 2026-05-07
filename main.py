@@ -244,7 +244,7 @@ class SubdomainsCollector:
         # subfinder
         try:
             logger.info(f"{color.GREEN}(+) Subdomain enumeration (subfinder){color.END}")
-            subprocess.run(["subfinder", "-dL", domains, "-all", "-o", output], check=True)
+            subprocess.run(["subfinder", "-dL", domains, "-all", "-o", output])
         except FileNotFoundError:
             logger.warning(f"{color.RED}(-) subfinder not found in PATH{color.END}")
         except Exception as e:
@@ -317,7 +317,7 @@ class SubdomainsCollector:
                 "-o", httpx_output,
             ]
             logger.info(f"{color.GREEN}(+) Probing alive hosts{color.END}")
-            subprocess.run(httpx_cmd, check=True)
+            subprocess.run(httpx_cmd)
             # Append only new alive targets to avoid duplicates across reruns.
             existing = set()
             if os.path.isfile(alive_output):
@@ -638,7 +638,7 @@ class SubdomainTakeOver:
                 "-o", output_dir,
                 "-e", self.auth0_email,
             ]
-            subprocess.run(badauth0_cmd, check=True)
+            subprocess.run(badauth0_cmd)
             logger.info(
                 f"{color.GREEN}(+) BadAuth0 scan completed → {output_dir}{color.END}")
         except FileNotFoundError:
@@ -787,9 +787,8 @@ class ScreenshotCapture:
         try:
             logger.info(f"{color.GREEN}(+) Capturing screenshots with gowitness{color.END}")
             subprocess.run(
-                ["gowitness", "file", "-f", hosts_file,
-                 "--screenshot-path", screenshots_dir,
-                 "--disable-db"],
+                ["gowitness", "scan", "file", "-f", hosts_file,
+                 "--screenshot-path", screenshots_dir],
                 capture_output=True, timeout=900,
             )
             screenshots = [
@@ -863,12 +862,11 @@ class UrlFinder:
                 return
             pattern = re.compile(pattern_re)
             with open(urls_file, "rb") as f:
-                lines = [
-                    line.decode(
-                        "utf-8", errors="replace").split("?")[0].strip()
-                    for line in f
-                    if pattern.search(line.decode("utf-8", errors="replace"))
-                ]
+                lines = []
+                for line in f:
+                    decoded = line.decode("utf-8", errors="replace")
+                    if pattern.search(decoded):
+                        lines.append(decoded.split("?")[0].strip())
             unique = sorted(set(ln for ln in lines if ln))
             if not unique:
                 return
@@ -896,10 +894,12 @@ class UrlFinder:
                 "-fx",   # extract form action targets
                 "-o", urls,
             ]
-            subprocess.run(katana_cmd, check=True, timeout=1800)
+            subprocess.run(katana_cmd, timeout=1800)
         except FileNotFoundError:
             logger.warning(
                 f"{color.RED}(-) katana not found in PATH{color.END}")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"{color.RED}(-) katana exited with code {e.returncode}{color.END}")
         except subprocess.TimeoutExpired:
             logger.warning("katana timed out, skipping")
 
@@ -908,12 +908,49 @@ class UrlFinder:
                 logger.warning(
                     f"{color.RED}(-) alive-hosts file missing or empty, skipping passive URL collection{color.END}")
             else:
-                # Run waybackurls, gau, waymore, and paramspider in parallel
+                # Build a clean list of bare domains for waybackurls/gau.
+                # alive-hosts.txt has lines like "https://www.foo.com" (one URL per line),
+                # but wayback archives often live under the apex (foo.com) not the www host.
+                # Include: every alive host's netloc, its apex (strip leading "www."),
+                # plus every domain from the user's original input file.
+                def _clean_domains():
+                    seen = set()
+                    out = []
+                    def _add(host):
+                        host = (host or "").strip().lower().split("/")[0]
+                        if host and host not in seen:
+                            seen.add(host)
+                            out.append(host)
+                            if host.startswith("www."):
+                                _add(host[4:])
+                    try:
+                        with open(self.domains, "r", encoding="utf-8", errors="replace") as df:
+                            for line in df:
+                                tok = line.strip().split()
+                                if not tok:
+                                    continue
+                                _add(urlparse(tok[0]).netloc or tok[0])
+                    except Exception as e:
+                        logger.debug(f"could not read input domains: {e}")
+                    try:
+                        with open(subdomains_file, "r", encoding="utf-8", errors="replace") as sf:
+                            for line in sf:
+                                tok = line.strip().split()
+                                if not tok:
+                                    continue
+                                _add(urlparse(tok[0]).netloc or tok[0])
+                    except Exception as e:
+                        logger.debug(f"could not read alive-hosts: {e}")
+                    return ("\n".join(out) + "\n").encode() if out else b""
+
+                # Run waybackurls and gau in parallel
                 def _run_waybackurls():
                     try:
-                        with open(subdomains_file, "rb") as f_in:
-                            p = subprocess.run(["waybackurls"], stdin=f_in,
-                                               capture_output=True, timeout=600)
+                        domains_input = _clean_domains()
+                        if not domains_input:
+                            return ("urls", b"")
+                        p = subprocess.run(["waybackurls"], input=domains_input,
+                                           capture_output=True, timeout=600)
                         if p.returncode != 0 and p.stderr:
                             logger.debug(f"waybackurls stderr: {p.stderr.decode(errors='replace')}")
                         return ("urls", p.stdout if p.stdout and p.stdout.strip() else b"")
@@ -925,10 +962,12 @@ class UrlFinder:
 
                 def _run_gau():
                     try:
-                        with open(subdomains_file, "rb") as f_in:
-                            p = subprocess.run(
-                                ["gau", "-subs", "-providers", "otx,commoncrawl", "-t", "5"],
-                                stdin=f_in, capture_output=True, timeout=600)
+                        domains_input = _clean_domains()
+                        if not domains_input:
+                            return ("urls", b"")
+                        p = subprocess.run(
+                            ["gau", "--subs"],
+                            input=domains_input, capture_output=True, timeout=600)
                         if p.returncode != 0 and p.stderr:
                             logger.debug(f"gau stderr: {p.stderr.decode(errors='replace')}")
                         return ("urls", p.stdout if p.stdout and p.stdout.strip() else b"")
@@ -946,18 +985,29 @@ class UrlFinder:
                         with open(subdomains_file, "r", encoding="utf-8") as sf:
                             hosts_list = [h.strip() for h in sf if h.strip()]
                         collected = b""
+                        deadline = time.time() + 1800  # 30-min global cap for all hosts
                         for host in hosts_list:
+                            if time.time() > deadline:
+                                logger.warning("waymore global timeout reached, stopping early")
+                                break
                             domain = urlparse(host).netloc or host
-                            p_wm = subprocess.run(
-                                ["waymore", "-i", domain, "-mode", "U", "-oU", "-"],
-                                capture_output=True, timeout=300)
-                            if p_wm.stdout and p_wm.stdout.strip():
-                                collected += p_wm.stdout
+                            _fd, tmp_path = tempfile.mkstemp(suffix=".txt")
+                            os.close(_fd)
+                            try:
+                                subprocess.run(
+                                    ["waymore", "-i", domain, "-mode", "U", "-oU", tmp_path],
+                                    capture_output=True, timeout=300)
+                                if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0:
+                                    with open(tmp_path, "rb") as tf:
+                                        collected += tf.read()
+                            except subprocess.TimeoutExpired:
+                                logger.debug(f"waymore timed out for {domain}")
+                            finally:
+                                if os.path.isfile(tmp_path):
+                                    os.unlink(tmp_path)
                         return ("urls", collected)
                     except FileNotFoundError:
                         logger.warning(f"{color.RED}(-) waymore not found in PATH{color.END}")
-                    except subprocess.TimeoutExpired:
-                        logger.warning("waymore timed out, skipping")
                     except Exception as e:
                         logger.debug(f"waymore failed: {e}")
                     return ("urls", b"")
@@ -966,16 +1016,17 @@ class UrlFinder:
                     tmp_dir = tempfile.mkdtemp()
                     try:
                         logger.info(f"{color.GREEN}(+) Running paramspider for parameter discovery{color.END}")
-                        # paramspider writes one file per domain into --output dir, not stdout
                         subprocess.run(
-                            ["paramspider", "-l", subdomains_file, "--output", tmp_dir],
-                            capture_output=True, timeout=600)
+                            ["paramspider", "-l", subdomains_file],
+                            capture_output=True, timeout=600, cwd=tmp_dir)
                         data = b""
-                        for fname in sorted(os.listdir(tmp_dir)):
-                            fpath = os.path.join(tmp_dir, fname)
-                            if os.path.isfile(fpath):
-                                with open(fpath, "rb") as fh:
-                                    data += fh.read()
+                        results_dir = os.path.join(tmp_dir, "results")
+                        if os.path.isdir(results_dir):
+                            for fname in sorted(os.listdir(results_dir)):
+                                fpath = os.path.join(results_dir, fname)
+                                if os.path.isfile(fpath):
+                                    with open(fpath, "rb") as fh:
+                                        data += fh.read()
                         return ("params", data)
                     except FileNotFoundError:
                         logger.warning(f"{color.RED}(-) paramspider not found in PATH{color.END}")
@@ -1006,9 +1057,6 @@ class UrlFinder:
                                            capture_output=True, timeout=60)
                         except Exception as e:
                             logger.debug(f"URL collector thread failed: {e}")
-
-            # Extract JS URLs with Python regex (Windows-safe, no grep)
-            self._filter_urls_by_regex(urls, r"\.js($|\?)", self.js_output)
 
             # Run gf patterns in parallel
             gf_list = ["xss", "ssrf", "lfi", "sqli", "ssti", "redirect"]
@@ -1279,7 +1327,7 @@ class DirFuzzer:
                 return
             self.wordlist = wordlist
 
-            logger.info(f"{color.GREEN}(+) Directory fuzzing with ffuf (parallel, max 5 hosts){color.END}")
+            logger.info(f"{color.GREEN}(+) Directory fuzzing with ffuf (parallel, max 3 hosts){color.END}")
 
             with open(hosts_file, "r", encoding="utf-8", errors="replace") as f:
                 hosts = [line.strip() for line in f if line.strip()]
@@ -1322,7 +1370,7 @@ class DirFuzzer:
                     if os.path.isfile(tmp_path):
                         os.unlink(tmp_path)
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
                 list(ex.map(_fuzz_host, hosts))
 
             with open(output, "w", encoding="utf-8") as out_f:
@@ -1491,7 +1539,7 @@ class FourOhThreeBypasser:
                 logger.info(f"{color.SKY_BLUE}(+) bypass-403 -> {host}{color.END}")
                 try:
                     p = subprocess.run(
-                        ["bypass-403", "-u", host],
+                        ["bypass-403", host, "/"],
                         capture_output=True,
                         timeout=120,
                     )
@@ -2177,6 +2225,8 @@ def generate_summary(output_file: str, domains: str):
 
     def _count_json_list(path):
         try:
+            if not os.path.isfile(path) or os.path.getsize(path) == 0:
+                return 0
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return len(data) if isinstance(data, list) else 0
@@ -2190,11 +2240,13 @@ def generate_summary(output_file: str, domains: str):
     summary["leaked_docs"]       = _count_lines(f"{output_file}/urls/leaked-docs.txt")
     summary["subdomain_takeovers"] = _count_json_list(f"{output_file}/vuln/takeovers.json")
     dmarc_path = f"{output_file}/vuln/missing-dmarc.json"
-    if os.path.isfile(dmarc_path):
-        with open(dmarc_path, "r", encoding="utf-8") as _f:
-            _dmarc_data = json.load(_f)
-    else:
-        _dmarc_data = []
+    _dmarc_data = []
+    if os.path.isfile(dmarc_path) and os.path.getsize(dmarc_path) > 0:
+        try:
+            with open(dmarc_path, "r", encoding="utf-8") as _f:
+                _dmarc_data = json.load(_f)
+        except json.JSONDecodeError:
+            pass
     summary["email_vuln_domains"] = sum(
         1 for r in _dmarc_data
         if isinstance(r, dict) and r.get("status") == "Vulnerable"
@@ -2427,12 +2479,17 @@ def main():
         slack_webhook=slack_webhook,
     )
 
+    def _cleanup_tmp():
+        if _single_tmp and os.path.isfile(_single_tmp.name):
+            os.unlink(_single_tmp.name)
+
     # Handle cleanup-only mode
     if args.cleanup_only:
         if not args.output:
             logger.error(
                 f"{color.RED}Error: Output directory (-o) must be specified for cleanup{color.END}"
             )
+            _cleanup_tmp()
             return
 
         try:
@@ -2442,19 +2499,21 @@ def main():
             notifier.notify(
                 telegram_token, telegram_chat_id, "(+) Cleanup process completed"
             )
-            return
         except Exception as e:
             logger.exception("Failed during cleanup")
             notifier.notify(
                 telegram_token, telegram_chat_id, "(-) Cleanup process failed"
             )
-            return
+        finally:
+            _cleanup_tmp()
+        return
 
     # Validate required arguments for normal scan
     if not args.domains or not args.output:
         logger.error(
             f"{color.RED}Error: Both domains (-d) and output (-o) must be specified for scanning{color.END}"
         )
+        _cleanup_tmp()
         return
 
     domains = args.domains
@@ -2510,7 +2569,7 @@ def main():
         takeovers_json_path = f"{output_file}/vuln/takeovers.json"
         takeover_count = 0
         try:
-            if os.path.isfile(takeovers_json_path):
+            if os.path.isfile(takeovers_json_path) and os.path.getsize(takeovers_json_path) > 0:
                 with open(takeovers_json_path) as _tf:
                     takeover_count = len(json.load(_tf))
         except Exception:
@@ -2519,7 +2578,6 @@ def main():
                else "(+) Subdomain takeover tests completed — no takeovers found")
         notifier.notify(telegram_token, telegram_chat_id, msg)
         logger.info("Subdomain takeover tests completed")
-        return subdomains_takeover
 
     def _run_buckets():
         _bucket_finder.buckets_cli()
