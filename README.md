@@ -11,6 +11,28 @@
 
 ## Get It Running  
 
+### Option 1 — `go install` (Recommended)
+
+If you have Go 1.22+ installed, grab the binary in one line:
+
+```bash
+go install github.com/OctaYus/FalconHunter/cmd/falcon@latest
+```
+
+This drops the `falcon` binary into `$(go env GOPATH)/bin`. Make sure that directory is on your `PATH`:
+
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+Then run it:
+
+```bash
+falcon -h
+```
+
+### Option 2 — Build from source
+
 1. **Grab the code**:  
    ```bash
    git clone https://github.com/OctaYus/FalconHunter.git
@@ -21,6 +43,11 @@
    ```bash
    pip install -r requirements.txt
    bash install.sh
+   ```  
+
+3. **Build the binary**:  
+   ```bash
+   go build -o falcon ./cmd/falcon
    ```  
 
 ## Notification Setup (Telegram, Discord, Slack)
