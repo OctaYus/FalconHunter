@@ -46,6 +46,64 @@ def _load_config() -> dict:
     except Exception:
         return {}
 
+
+# ---------------------------------------------------------------------------
+# falcon binary resolver
+# ---------------------------------------------------------------------------
+# The UI prefers the Go binary `falcon` over the legacy `python3 main.py`.
+# Lookup order:
+#   1. $FALCON_BIN env var (explicit override)
+#   2. ./cmd/falcon/falcon at repo root (local `go build` output)
+#   3. `falcon` on $PATH (e.g. ~/go/bin/falcon after `go install`)
+#   4. fallback: [python3, main.py] with a warning logged once
+#
+# Result is cached after first resolution.
+_FALCON_CMD_CACHE: list | None = None
+_FALCON_FALLBACK_WARNED = False
+
+
+def falcon_cmd() -> list:
+    """Return the command prefix for invoking FalconHunter (e.g. ['falcon'] or
+    ['python3', '/path/to/main.py']). All callers should use this — never
+    hard-code main.py."""
+    global _FALCON_CMD_CACHE, _FALCON_FALLBACK_WARNED
+    if _FALCON_CMD_CACHE is not None:
+        return list(_FALCON_CMD_CACHE)
+
+    # 1) Explicit override
+    override = os.environ.get("FALCON_BIN", "").strip()
+    if override and os.path.isfile(override) and os.access(override, os.X_OK):
+        _FALCON_CMD_CACHE = [override]
+        return list(_FALCON_CMD_CACHE)
+
+    # 2) Local build at cmd/falcon/falcon
+    local_bin = os.path.join(MAIN_DIR, "cmd", "falcon", "falcon")
+    if sys.platform.startswith("win"):
+        local_bin += ".exe"
+    if os.path.isfile(local_bin) and os.access(local_bin, os.X_OK):
+        _FALCON_CMD_CACHE = [local_bin]
+        return list(_FALCON_CMD_CACHE)
+
+    # 3) `falcon` on PATH (covers `go install` -> ~/go/bin/falcon)
+    on_path = shutil.which("falcon")
+    if on_path:
+        _FALCON_CMD_CACHE = [on_path]
+        return list(_FALCON_CMD_CACHE)
+
+    # 4) Fallback: python main.py — warn once
+    if not _FALCON_FALLBACK_WARNED:
+        print(
+            "[falcon_cmd] WARNING: Go `falcon` binary not found — falling back "
+            "to python3 main.py. Build it with:\n"
+            "    cd " + MAIN_DIR + " && go build -o cmd/falcon/falcon ./cmd/falcon\n"
+            "or install with:\n"
+            "    go install github.com/OctaYus/FalconHunter/cmd/falcon@latest",
+            file=sys.stderr,
+        )
+        _FALCON_FALLBACK_WARNED = True
+    _FALCON_CMD_CACHE = [sys.executable, os.path.join(MAIN_DIR, "main.py")]
+    return list(_FALCON_CMD_CACHE)
+
 # scan_id -> { running, output_dir, process, log_file, ... }
 active_scans: dict = {}
 
@@ -395,10 +453,10 @@ def get_csrf_token():
 @app.route("/check_tools")
 @login_required
 def check_tools():
-    """Run main.py --check-tools and return output."""
+    """Run `falcon --check-tools` (Go binary) and return output."""
     try:
         result = subprocess.run(
-            [sys.executable, os.path.join(MAIN_DIR, "main.py"), "--check-tools"],
+            falcon_cmd() + ["--check-tools"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -562,9 +620,7 @@ def start_scan():
 
     scan_id = str(uuid.uuid4())
 
-    cmd = [
-        sys.executable,
-        os.path.join(MAIN_DIR, "main.py"),
+    cmd = falcon_cmd() + [
         "-d", domains_file,
         "-o", output_dir,
         "-c", config_path,
@@ -1532,9 +1588,7 @@ def _scheduler_loop():
                             domains_file = tmp.name
                             scan_id = str(uuid.uuid4())
                             extra_flags = sched.get("flags", [])
-                            cmd = [
-                                sys.executable,
-                                os.path.join(MAIN_DIR, "main.py"),
+                            cmd = falcon_cmd() + [
                                 "-d", domains_file,
                                 "-o", output_dir,
                             ] + [f for f in extra_flags if isinstance(f, str)]

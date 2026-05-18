@@ -181,6 +181,15 @@ test_out*/
 test/
 test.txt
 *.txt.bak
+go-test/
+
+############################
+# Go build artefacts
+############################
+/falcon
+/falcon.exe
+/cmd/falcon/falcon
+/cmd/falcon/falcon.exe
 
 ############################
 # IDE / Editor
@@ -214,3 +223,6 @@ lucid/
 mantra/
 -
 epicgames
+nintendo/
+nintendo.txt
+nintendo*/

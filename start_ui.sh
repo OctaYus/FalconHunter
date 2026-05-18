@@ -233,6 +233,34 @@ if ! python3 -c "import flask" 2>/dev/null; then
     python3 -m pip install -q flask 2>/dev/null || pip3 install -q flask
 fi
 
+# ── Go binary (preferred over python main.py) ────────────────────────
+# Build cmd/falcon/falcon if go is installed and the binary is missing or stale.
+# UI falls back to python main.py if this fails — no hard error.
+FALCON_BIN="$SCRIPT_DIR/cmd/falcon/falcon"
+GO_SRC="$SCRIPT_DIR/cmd/falcon/main.go"
+
+if command -v go &>/dev/null && [[ -f "$GO_SRC" ]]; then
+    needs_build=0
+    if [[ ! -x "$FALCON_BIN" ]]; then
+        needs_build=1
+    elif [[ "$GO_SRC" -nt "$FALCON_BIN" ]]; then
+        needs_build=1
+    fi
+    if [[ "$needs_build" -eq 1 ]]; then
+        echo -e "${CYAN}[*] Building Go falcon binary...${NC}"
+        if (cd "$SCRIPT_DIR" && go build -o "$FALCON_BIN" ./cmd/falcon 2>/tmp/falcon-build.log); then
+            echo -e "${GREEN}[+] Built $FALCON_BIN${NC}"
+        else
+            echo -e "${YELLOW}[!] Go build failed (UI will fall back to python main.py). Log: /tmp/falcon-build.log${NC}"
+        fi
+    else
+        echo -e "${GREEN}[+] Using existing Go binary: $FALCON_BIN${NC}"
+    fi
+elif [[ -f "$GO_SRC" ]]; then
+    echo -e "${YELLOW}[!] Go toolchain not installed — UI will use python main.py.${NC}"
+    echo -e "${YELLOW}    Install Go and re-run for the faster native scanner.${NC}"
+fi
+
 # ── resolve port ──────────────────────────────────────────────────────
 
 PORT="$PREFERRED_PORT"
