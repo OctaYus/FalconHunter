@@ -195,7 +195,6 @@ class MakeDirectories:
                 "js-findings.txt",
                 "missing-dmarc.json",
                 "takeovers.json",
-                "subzy.txt",
                 "aws_vuln_bucket.txt",
                 "lfi-urls.txt",
                 "lfi-subs.txt",
@@ -562,52 +561,55 @@ class SubdomainTakeOver:
                 f"{color.RED}Error reading subdomains/CNAME: {e}{color.END}")
 
     def test_takeover(self):
-        """Test for potential subdomain takeovers using subzy."""
+        """Test for potential subdomain takeovers via nuclei takeover templates."""
         subs_file = f"{self.output_file}/hosts/subs.txt"
-        subzy_out = f"{self.output_file}/vuln/subzy.txt"
+        nuclei_out = f"{self.output_file}/vuln/takeovers-nuclei.txt"
+        takeovers_json = f"{self.output_file}/vuln/takeovers.json"
         if not os.path.isfile(subs_file) or os.path.getsize(subs_file) == 0:
             logger.debug("No subdomains file for takeover tests, skipping")
             return
-        try:
-            logger.info(
-                f"{color.GREEN}(+) Running subzy for takeover detection{color.END}")
-            p = subprocess.run(
-                ["subzy", "run", "--targets", os.path.abspath(subs_file), "--hide-fails"],
-                capture_output=True,
-                timeout=600,
-            )
-            if p.stdout and p.stdout.strip():
-                with open(subzy_out, "wb") as f:
-                    f.write(p.stdout)
-            if p.returncode != 0 and p.stderr:
-                logger.debug(
-                    f"subzy stderr: {p.stderr.decode(errors='replace')}")
-        except FileNotFoundError:
-            logger.warning(
-                f"{color.RED}(-) subzy not found in PATH (optional){color.END}")
-        except subprocess.TimeoutExpired:
-            logger.warning(f"{color.RED}(-) subzy timed out{color.END}")
-        except Exception as e:
-            logger.debug(f"subzy failed: {e}")
 
-        # Parse subzy findings → takeovers.json
         takeovers = []
         try:
-            if os.path.isfile(subzy_out):
-                with open(subzy_out, "r", encoding="utf-8", errors="replace") as f:
+            logger.info(
+                f"{color.GREEN}(+) Running nuclei takeover templates{color.END}")
+            p = subprocess.run(
+                [find_go_bin("nuclei"), "-l", os.path.abspath(subs_file),
+                 "-t", "http/takeovers/", "-silent", "-nc", "-o", nuclei_out],
+                capture_output=True,
+                timeout=900,
+            )
+            if p.returncode != 0 and p.stderr:
+                logger.debug(
+                    f"nuclei stderr: {p.stderr.decode(errors='replace')}")
+        except FileNotFoundError:
+            logger.warning(
+                f"{color.RED}(-) nuclei not found in PATH (optional){color.END}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) nuclei timed out{color.END}")
+        except Exception as e:
+            logger.debug(f"nuclei takeover scan failed: {e}")
+
+        try:
+            if os.path.isfile(nuclei_out):
+                with open(nuclei_out, "r", encoding="utf-8", errors="replace") as f:
                     for line in f:
                         line = line.strip()
-                        if "[VULNERABLE]" in line.upper() and "[NOT VULNERABLE]" not in line.upper():
-                            # subzy format: [VULNERABLE] subdomain - service
-                            parts = line.split("]", 1)[-1].strip().split(" - ", 1)
-                            subdomain = parts[0].strip() if parts else line
-                            service = parts[1].strip() if len(parts) > 1 else "unknown"
-                            takeovers.append({"subdomain": subdomain, "service": service, "tool": "subzy"})
-                            logger.info(f"{color.RED}[!] Takeover: {subdomain} ({service}) via subzy{color.END}")
+                        if not line:
+                            continue
+                        # nuclei format: [template-id] [protocol] [severity] target
+                        m = re.match(r"\[([^\]]+)\]\s+\[[^\]]+\]\s+\[[^\]]+\]\s+(\S+)", line)
+                        if m:
+                            service = m.group(1)
+                            subdomain = m.group(2)
+                        else:
+                            service = "unknown"
+                            subdomain = line
+                        takeovers.append({"subdomain": subdomain, "service": service, "tool": "nuclei"})
+                        logger.info(f"{color.RED}[!] Takeover: {subdomain} ({service}) via nuclei{color.END}")
         except Exception as e:
-            logger.debug(f"Error parsing subzy output: {e}")
+            logger.debug(f"Error parsing nuclei takeover output: {e}")
 
-        takeovers_json = f"{self.output_file}/vuln/takeovers.json"
         try:
             with open(takeovers_json, "w", encoding="utf-8") as jf:
                 json.dump(takeovers, jf, indent=4)
@@ -2407,12 +2409,68 @@ def load_config(config_path="config.yaml"):
         raise
 
 
+def update_tool():
+    """Self-update FalconHunter by pulling the latest changes from the upstream git repo.
+
+    Mirrors the UX of `subfinder -up` / `nuclei -up`: detect the install
+    directory, fast-forward the working tree, and report what changed.
+    """
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"{color.GREEN}(+) Updating FalconHunter in {repo_dir}{color.END}")
+
+    if not os.path.isdir(os.path.join(repo_dir, ".git")):
+        print(f"{color.RED}(-) Not a git checkout — clone the repo to use -up{color.END}")
+        print(f"    git clone https://github.com/octayus/FalconHunter {repo_dir}")
+        return False
+
+    if not shutil.which("git"):
+        print(f"{color.RED}(-) git not found in PATH — cannot self-update{color.END}")
+        return False
+
+    try:
+        head_before = subprocess.run(
+            ["git", "-C", repo_dir, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30,
+        ).stdout.strip()
+
+        p = subprocess.run(
+            ["git", "-C", repo_dir, "pull", "--ff-only"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if p.returncode != 0:
+            print(f"{color.RED}(-) git pull failed:{color.END}\n{p.stderr.strip() or p.stdout.strip()}")
+            return False
+
+        head_after = subprocess.run(
+            ["git", "-C", repo_dir, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30,
+        ).stdout.strip()
+
+        if head_before == head_after:
+            print(f"{color.SKY_BLUE}(i) FalconHunter is already up to date ({head_after[:7]}){color.END}")
+        else:
+            print(f"{color.GREEN}(+) Updated {head_before[:7]} → {head_after[:7]}{color.END}")
+            log = subprocess.run(
+                ["git", "-C", repo_dir, "log", "--oneline", f"{head_before}..{head_after}"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout.strip()
+            if log:
+                print(log)
+        return True
+    except subprocess.TimeoutExpired:
+        print(f"{color.RED}(-) git pull timed out{color.END}")
+        return False
+    except Exception as e:
+        print(f"{color.RED}(-) Update failed: {e}{color.END}")
+        return False
+
+
 def check_tools():
     """Check required and optional CLI tools."""
     required = ["subfinder", "httpx", "waybackurls", "anew"]
     optional = [
         "gau", "gf", "cnfinder", "BadAuth0", "mantra", "katana",
-        "nuclei", "subjack", "subzy", "s3scanner", "aws_extractor", "ffuf",
+        "nuclei", "s3scanner", "aws_extractor", "ffuf",
         "corsy", "crlfuzz", "dirsearch", "bypass-403", "kr",
         "dalfox", "openredirex", "paramspider", "secretfinder",
         "trufflehog", "gitleaks", "amass", "dnsx", "waymore",
@@ -2696,7 +2754,16 @@ def main():
         action="store_true",
         help="Check for required/optional CLI tools in PATH and exit (see docs for tool list)",
     )
+    parser.add_argument(
+        "-up", "--update",
+        action="store_true",
+        help="Update FalconHunter to the latest version from the upstream repo and exit",
+    )
     args = parser.parse_args()
+
+    if args.update:
+        update_tool()
+        return
 
     if args.check_tools:
         check_tools()

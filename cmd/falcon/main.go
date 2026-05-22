@@ -386,7 +386,7 @@ func makeDirectories(outputFile string) {
 		"nuclei-output.txt", "nuclei-dast-output.txt", "ffuf-output.txt",
 		"xss.txt", "lfi.txt", "ssrf.txt", "sqli.txt", "ssti.txt",
 		"js-findings.txt", "missing-dmarc.json", "takeovers.json",
-		"subzy.txt", "aws_vuln_bucket.txt", "lfi-urls.txt", "lfi-subs.txt",
+		"aws_vuln_bucket.txt", "lfi-urls.txt", "lfi-subs.txt",
 		"cors.txt", "crlf.txt", "403-bypass.txt", "api-endpoints.txt",
 		"dirsearch-output.txt", "dalfox-xss.txt", "open-redirects.txt",
 		"secrets.txt", "trufflehog.txt", "waf.txt", "params-arjun.txt",
@@ -402,11 +402,89 @@ func makeDirectories(outputFile string) {
 
 // ─── check_tools ─────────────────────────────────────────────────────────────
 
+// ─── update ──────────────────────────────────────────────────────────────────
+
+// repoDir returns the directory of the FalconHunter checkout. The binary
+// usually lives in cmd/falcon/, so we walk upward looking for a .git folder.
+func repoDir() string {
+	exe, err := os.Executable()
+	start := ""
+	if err == nil {
+		start = filepath.Dir(exe)
+	}
+	if cwd, err := os.Getwd(); err == nil && start == "" {
+		start = cwd
+	}
+	dir := start
+	for i := 0; i < 6 && dir != "" && dir != "/"; i++ {
+		if st, err := os.Stat(filepath.Join(dir, ".git")); err == nil && st.IsDir() {
+			return dir
+		}
+		dir = filepath.Dir(dir)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return start
+}
+
+func updateTool() bool {
+	dir := repoDir()
+	fmt.Println(green("(+) Updating FalconHunter in " + dir))
+
+	if st, err := os.Stat(filepath.Join(dir, ".git")); err != nil || !st.IsDir() {
+		fmt.Println(red("(-) Not a git checkout — clone the repo to use -up"))
+		fmt.Println("    git clone https://github.com/octayus/FalconHunter " + dir)
+		return false
+	}
+
+	if _, err := exec.LookPath("git"); err != nil {
+		fmt.Println(red("(-) git not found in PATH — cannot self-update"))
+		return false
+	}
+
+	head := func() string {
+		out, _, _ := run(30*time.Second, "git", "-C", dir, "rev-parse", "HEAD")
+		return strings.TrimSpace(string(out))
+	}
+	before := head()
+
+	stdout, stderr, err := run(2*time.Minute, "git", "-C", dir, "pull", "--ff-only")
+	if err != nil {
+		msg := strings.TrimSpace(string(stderr))
+		if msg == "" {
+			msg = strings.TrimSpace(string(stdout))
+		}
+		fmt.Println(red("(-) git pull failed: " + msg))
+		return false
+	}
+
+	after := head()
+	if before == after {
+		fmt.Println(skyBlue("(i) FalconHunter is already up to date (" + shortSHA(after) + ")"))
+		return true
+	}
+	fmt.Println(green("(+) Updated " + shortSHA(before) + " → " + shortSHA(after)))
+	log, _, _ := run(30*time.Second, "git", "-C", dir, "log", "--oneline", before+".."+after)
+	if s := strings.TrimSpace(string(log)); s != "" {
+		fmt.Println(s)
+	}
+	fmt.Println(skyBlue("(i) Rebuild the binary: go build -o cmd/falcon/falcon ./cmd/falcon/"))
+	return true
+}
+
+func shortSHA(sha string) string {
+	if len(sha) >= 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
 func checkTools() bool {
 	required := []string{"subfinder", "httpx", "waybackurls", "anew"}
 	optional := []string{
 		"gau", "gf", "cnfinder", "BadAuth0", "mantra", "katana",
-		"nuclei", "subjack", "subzy", "s3scanner", "aws_extractor", "ffuf",
+		"nuclei", "s3scanner", "aws_extractor", "ffuf",
 		"corsy", "crlfuzz", "dirsearch", "bypass-403", "kr",
 		"dalfox", "openredirex", "paramspider", "secretfinder",
 		"trufflehog", "gitleaks", "amass", "dnsx", "waymore",
@@ -778,47 +856,42 @@ func getCNAME(outputFile string) {
 
 func testTakeover(outputFile string) {
 	subsFile := filepath.Join(outputFile, "hosts", "subs.txt")
-	subzyOut := filepath.Join(outputFile, "vuln", "subzy.txt")
+	nucleiOut := filepath.Join(outputFile, "vuln", "takeovers-nuclei.txt")
 
 	if !fileExistsNonEmpty(subsFile) {
 		logDebug("No subdomains file for takeover tests, skipping")
 		return
 	}
-	logInfo(green("(+) Running subzy for takeover detection"))
+	logInfo(green("(+) Running nuclei takeover templates"))
 	absPath, _ := filepath.Abs(subsFile)
-	stdout, stderr, err := run(10*time.Minute, "subzy", "run", "--targets", absPath, "--hide-fails")
+	_, stderr, err := run(15*time.Minute, findGoBin("nuclei"),
+		"-l", absPath, "-t", "http/takeovers/", "-silent", "-nc", "-o", nucleiOut)
 	if err != nil && strings.Contains(err.Error(), "not found") {
-		logWarn(red("(-) subzy not found in PATH (optional)"))
+		logWarn(red("(-) nuclei not found in PATH (optional)"))
 		return
 	}
 	if len(stderr) > 0 {
-		logDebug("subzy stderr: " + string(stderr))
-	}
-	if len(bytes.TrimSpace(stdout)) > 0 {
-		os.WriteFile(subzyOut, stdout, 0644)
+		logDebug("nuclei stderr: " + string(stderr))
 	}
 
-	// Parse findings
 	var takeovers []takeoverEntry
-	for _, line := range strings.Split(string(stdout), "\n") {
-		line = strings.TrimSpace(line)
-		upper := strings.ToUpper(line)
-		if !strings.Contains(upper, "[VULNERABLE]") || strings.Contains(upper, "[NOT VULNERABLE]") {
-			continue
+	if fileExistsNonEmpty(nucleiOut) {
+		lines, _ := readLines(nucleiOut)
+		re := regexp.MustCompile(`\[([^\]]+)\]\s+\[[^\]]+\]\s+\[[^\]]+\]\s+(\S+)`)
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			service := "unknown"
+			subdomain := line
+			if m := re.FindStringSubmatch(line); m != nil {
+				service = m[1]
+				subdomain = m[2]
+			}
+			takeovers = append(takeovers, takeoverEntry{Subdomain: subdomain, Service: service, Tool: "nuclei"})
+			logInfo(red("[!] Takeover: " + subdomain + " (" + service + ") via nuclei"))
 		}
-		// subzy format: "[VULNERABLE] subdomain - service"
-		afterTag := line
-		if idx := strings.Index(line, "]"); idx >= 0 {
-			afterTag = line[idx+1:]
-		}
-		parts := strings.SplitN(strings.TrimSpace(afterTag), " - ", 2)
-		subdomain := strings.TrimSpace(parts[0])
-		service := "unknown"
-		if len(parts) > 1 {
-			service = strings.TrimSpace(parts[1])
-		}
-		takeovers = append(takeovers, takeoverEntry{Subdomain: subdomain, Service: service, Tool: "subzy"})
-		logInfo(red("[!] Takeover: " + subdomain + " (" + service + ") via subzy"))
 	}
 
 	takeJSON := filepath.Join(outputFile, "vuln", "takeovers.json")
@@ -2654,6 +2727,7 @@ type Args struct {
 	resume      bool
 	email       string
 	checkTools  bool
+	update      bool
 	cleanupOnly bool
 	nuclei      bool
 	ffuf        bool
@@ -2690,6 +2764,8 @@ func parseArgs() Args {
 	flag.StringVar(&a.email, "e", "", "Email for Auth0 misconfig test")
 	flag.StringVar(&a.email, "email", "", "Email for Auth0 misconfig test")
 	flag.BoolVar(&a.checkTools, "check-tools", false, "Check required/optional CLI tools and exit")
+	flag.BoolVar(&a.update, "up", false, "Update FalconHunter to the latest version and exit")
+	flag.BoolVar(&a.update, "update", false, "Update FalconHunter to the latest version and exit")
 	flag.BoolVar(&a.cleanupOnly, "cleanup-only", false, "Run only cleanup on existing output directory")
 	flag.BoolVar(&a.nuclei, "nuclei", false, "Run Nuclei scans (optional)")
 	flag.BoolVar(&a.ffuf, "ffuf", false, "Run ffuf directory fuzzing (optional)")
@@ -2716,6 +2792,11 @@ func parseArgs() Args {
 
 func main() {
 	args := parseArgs()
+
+	if args.update {
+		updateTool()
+		return
+	}
 
 	if args.checkTools {
 		checkTools()
