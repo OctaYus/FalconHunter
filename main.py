@@ -166,6 +166,8 @@ class MakeDirectories:
                 "js-files.txt",
                 "leaked-docs.txt",
                 "mantra_output.txt",
+                "jsluice-secrets.txt",
+                "jsluice-urls.txt",
                 "params.txt",
                 "gf-xss.txt",
                 "gf-ssrf.txt",
@@ -858,6 +860,8 @@ class UrlFinder:
         self.js_output = f"{self.output_file}/urls/js-files.txt"
         self.leaked_docs = f"{self.output_file}/urls/leaked-docs.txt"
         self.mantra_output = f"{self.output_file}/urls/mantra_output.txt"
+        self.jsluice_secrets = f"{self.output_file}/urls/jsluice-secrets.txt"
+        self.jsluice_urls = f"{self.output_file}/urls/jsluice-urls.txt"
 
     def _filter_urls_by_regex(self, urls_file, pattern_re, dest_file):
         """Filter lines from urls_file by regex (Python-based, Windows-safe, no grep). Append unique lines to dest_file via anew."""
@@ -947,39 +951,50 @@ class UrlFinder:
                         logger.debug(f"could not read alive-hosts: {e}")
                     return ("\n".join(out) + "\n").encode() if out else b""
 
-                # Run waybackurls and gau in parallel
-                def _run_waybackurls():
+                def _pipeline_collect(tool_name, pipe_cmd, out_basename):
+                    """Run `cat <domains> | <tool> | anew <out>` via a shell pipeline.
+
+                    Using shell=True is the only reliable way to get the
+                    cat | tool | anew plumbing to behave across builds of
+                    waybackurls/gau. Each tool writes to its own file so the
+                    two pipelines never anew the shared all-urls.txt at the same
+                    time; the per-tool file is then merged by the caller.
+                    """
+                    if not shutil.which(tool_name):
+                        logger.warning(f"{color.RED}(-) {tool_name} not found in PATH{color.END}")
+                        return ("urls", b"")
+                    domains_input = _clean_domains()
+                    if not domains_input:
+                        return ("urls", b"")
+                    _fd, dom_tmp = tempfile.mkstemp(suffix=".txt")
+                    os.write(_fd, domains_input)
+                    os.close(_fd)
+                    tool_out = f"{self.output_file}/urls/{out_basename}"
+                    cmd = (
+                        f"cat {shlex.quote(dom_tmp)} | {pipe_cmd} "
+                        f"| anew {shlex.quote(tool_out)}"
+                    )
                     try:
-                        domains_input = _clean_domains()
-                        if not domains_input:
-                            return ("urls", b"")
-                        p = subprocess.run(["waybackurls"], input=domains_input,
-                                           capture_output=True, timeout=600)
-                        if p.returncode != 0 and p.stderr:
-                            logger.debug(f"waybackurls stderr: {p.stderr.decode(errors='replace')}")
-                        return ("urls", p.stdout if p.stdout and p.stdout.strip() else b"")
-                    except FileNotFoundError:
-                        logger.warning(f"{color.RED}(-) waybackurls not found in PATH{color.END}")
+                        subprocess.run(cmd, shell=True, timeout=600)
                     except subprocess.TimeoutExpired:
-                        logger.warning("waybackurls timed out, skipping")
-                    return ("urls", b"")
+                        logger.warning(f"{tool_name} timed out, skipping")
+                    except subprocess.CalledProcessError as e:
+                        logger.debug(f"{tool_name} pipeline exit: {e}")
+                    finally:
+                        if os.path.isfile(dom_tmp):
+                            os.unlink(dom_tmp)
+                    data = b""
+                    if os.path.isfile(tool_out):
+                        with open(tool_out, "rb") as f:
+                            data = f.read()
+                    return ("urls", data)
+
+                # Run waybackurls and gau in parallel, each via its own shell pipeline
+                def _run_waybackurls():
+                    return _pipeline_collect("waybackurls", "waybackurls", ".waybackurls.txt")
 
                 def _run_gau():
-                    try:
-                        domains_input = _clean_domains()
-                        if not domains_input:
-                            return ("urls", b"")
-                        p = subprocess.run(
-                            ["gau", "--subs"],
-                            input=domains_input, capture_output=True, timeout=600)
-                        if p.returncode != 0 and p.stderr:
-                            logger.debug(f"gau stderr: {p.stderr.decode(errors='replace')}")
-                        return ("urls", p.stdout if p.stdout and p.stdout.strip() else b"")
-                    except FileNotFoundError:
-                        logger.warning(f"{color.RED}(-) gau not found in PATH{color.END}")
-                    except subprocess.TimeoutExpired:
-                        logger.warning("gau timed out, skipping")
-                    return ("urls", b"")
+                    return _pipeline_collect("gau", "gau --subs", ".gau.txt")
 
                 def _run_waymore():
                     if not shutil.which("waymore"):
@@ -1159,6 +1174,124 @@ class UrlFinder:
             logger.warning(f"{color.RED}(-) {e}{color.END}")
         except Exception as e:
             logger.exception(f"{color.RED}Error occurred: {e}{color.END}")
+
+    def extract_js_data_with_jsluice(self):
+        """Extract secrets and endpoints from JS files using jsluice.
+
+        jsluice (BishopFox) is an AST-based JS analyzer — it fetches the JS
+        URLs itself and parses them with tree-sitter, so it is much faster and
+        far lighter on CPU/RAM than mantra. This is the default JS scanner;
+        mantra is opt-in via --mantra.
+        """
+        jsluice = find_go_bin("jsluice")
+        found = os.path.isfile(jsluice) if os.path.isabs(jsluice) else bool(shutil.which(jsluice))
+        if not found:
+            logger.warning(f"{color.RED}(-) jsluice not found in PATH, skipping{color.END}")
+            return
+        if not (os.path.isfile(self.js_output) and os.path.getsize(self.js_output) > 0):
+            logger.warning(f"{color.RED}(-) js-files.txt empty, skipping jsluice{color.END}")
+            return
+
+        with open(self.js_output, "r", encoding="utf-8", errors="replace") as fh:
+            js_urls = [u.strip() for u in fh if u.strip()]
+        if not js_urls:
+            logger.info(f"{color.SKY_BLUE}(-) jsluice: no JS URLs to scan{color.END}")
+            return
+
+        logger.info(
+            f"{color.GREEN}[+] jsluice: scanning {len(js_urls)} JS URL(s) for secrets + endpoints{color.END}"
+        )
+
+        def _run_mode(mode, urls):
+            """Run a jsluice mode over the URLs in batches (bounded ARGV)."""
+            lines = []
+            batch_size = 60
+            for i in range(0, len(urls), batch_size):
+                batch = urls[i:i + batch_size]
+                try:
+                    p = subprocess.run(
+                        [jsluice, mode, "-c", "10", "-i", *batch],
+                        capture_output=True, timeout=300,
+                    )
+                    if p.stdout:
+                        lines.extend(
+                            ln for ln in p.stdout.decode(errors="replace").splitlines() if ln.strip()
+                        )
+                except subprocess.TimeoutExpired:
+                    logger.debug(f"jsluice {mode} batch timed out")
+                except Exception as e:
+                    logger.debug(f"jsluice {mode} batch failed: {e}")
+            return lines
+
+        # Secrets — primary output (direct mantra replacement)
+        secret_lines = _run_mode("secrets", js_urls)
+        if secret_lines:
+            with open(self.jsluice_secrets, "w", encoding="utf-8") as f:
+                f.write("\n".join(secret_lines) + "\n")
+            high = 0
+            for ln in secret_lines:
+                try:
+                    obj = json.loads(ln)
+                    sev = (obj.get("severity") or "").lower()
+                    kind = obj.get("kind", "secret")
+                    if sev in ("high", "medium"):
+                        high += 1
+                        logger.info(f"{color.RED}[!] jsluice secret ({sev}): {kind}{color.END}")
+                except Exception:
+                    pass
+            logger.info(
+                f"{color.RED}[!] jsluice: {len(secret_lines)} secret finding(s) "
+                f"({high} medium/high) → {self.jsluice_secrets}{color.END}"
+            )
+        else:
+            logger.info(f"{color.GREEN}(+) jsluice: no secrets found in JS files{color.END}")
+
+        # Endpoints/URLs — bonus surface, same tool, near-zero extra cost
+        url_lines = _run_mode("urls", js_urls)
+        if url_lines:
+            with open(self.jsluice_urls, "w", encoding="utf-8") as f:
+                f.write("\n".join(url_lines) + "\n")
+            logger.info(
+                f"{color.GREEN}[+] jsluice: {len(url_lines)} endpoint(s) → {self.jsluice_urls}{color.END}"
+            )
+
+    def dependency_confusion_depfusion(self):
+        """Scan JS + sourcemap URLs for dependency-confusion via depfusion.
+
+        depfusion (OctaYus) parses JS/sourcemaps for npm package references and
+        checks the registry for claimable (unregistered) packages. Lightweight,
+        worker-pooled, takes the JS URL list directly with -f.
+        """
+        depfusion = find_go_bin("depfusion")
+        found = os.path.isfile(depfusion) if os.path.isabs(depfusion) else bool(shutil.which(depfusion))
+        if not found:
+            logger.warning(f"{color.RED}(-) depfusion not found in PATH, skipping{color.END}")
+            return
+        if not (os.path.isfile(self.js_output) and os.path.getsize(self.js_output) > 0):
+            logger.warning(f"{color.RED}(-) js-files.txt empty, skipping depfusion{color.END}")
+            return
+
+        out_dir = f"{self.output_file}/urls/depfusion"
+        os.makedirs(out_dir, exist_ok=True)
+        logger.info(f"{color.GREEN}(+) Running depfusion (dependency confusion){color.END}")
+        try:
+            subprocess.run(
+                [depfusion, "-f", os.path.abspath(self.js_output),
+                 "-o", out_dir, "-workers", "40", "-no-color"],
+                capture_output=True, timeout=900,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(f"{color.RED}(-) depfusion timed out{color.END}")
+        except Exception as e:
+            logger.debug(f"depfusion failed: {e}")
+
+        claimable = os.path.join(out_dir, "claimable.txt")
+        if os.path.isfile(claimable) and os.path.getsize(claimable) > 0:
+            with open(claimable, "r", encoding="utf-8", errors="replace") as f:
+                n = sum(1 for ln in f if ln.strip())
+            logger.info(f"{color.RED}[!] depfusion: {n} claimable package(s) → {claimable}{color.END}")
+        else:
+            logger.info(f"{color.GREEN}(+) depfusion: no claimable packages found{color.END}")
 
     def extract_js_data_with_mantra(self):
         """Extract data from JavaScript files using Mantra.
@@ -2469,7 +2602,7 @@ def check_tools():
     """Check required and optional CLI tools."""
     required = ["subfinder", "httpx", "waybackurls", "anew"]
     optional = [
-        "gau", "gf", "cnfinder", "BadAuth0", "mantra", "katana",
+        "gau", "gf", "cnfinder", "BadAuth0", "mantra", "jsluice", "depfusion", "katana",
         "nuclei", "s3scanner", "aws_extractor", "ffuf",
         "corsy", "crlfuzz", "dirsearch", "bypass-403", "kr",
         "dalfox", "openredirex", "paramspider", "secretfinder",
@@ -2648,7 +2781,7 @@ def main():
     )
     parser.add_argument(
         "--all", dest="run_all", action="store_true",
-        help="Enable ALL optional modules (nuclei, ffuf, cors, crlf, dirsearch, 403, api, xss, redirect, secrets, waf, screenshot, params, lfi)",
+        help="Enable ALL optional modules (nuclei, mantra, ffuf, cors, crlf, dirsearch, 403, api, xss, redirect, secrets, waf, screenshot, params, lfi)",
     )
     parser.add_argument(
         "--skip", metavar="MODULES",
@@ -2662,6 +2795,12 @@ def main():
         "--nuclei",
         action="store_true",
         help="Run Nuclei scans (optional)",
+    )
+    parser.add_argument(
+        "-mantra", "--mantra",
+        dest="mantra",
+        action="store_true",
+        help="Run mantra for JS secret extraction (heavy; jsluice runs by default instead)",
     )
     parser.add_argument(
         "-e", "--email", help="Email to test for auth0 misconfigurations"
@@ -2776,6 +2915,7 @@ def main():
     if args.run_all:
         for attr, mod in [
             ("nuclei",     "nuclei"),
+            ("mantra",     "mantra"),
             ("ffuf",       "ffuf"),
             ("cors",       "cors"),
             ("crlf",       "crlf"),
@@ -2929,7 +3069,11 @@ def main():
         finder.extract_js_files()
         _bucket_finder.aws_extractor()
         finder.extract_documents()
-        finder.extract_js_data_with_mantra()
+        # jsluice is the default lightweight JS scanner; mantra is opt-in (--mantra).
+        finder.extract_js_data_with_jsluice()
+        finder.dependency_confusion_depfusion()
+        if args.mantra:
+            finder.extract_js_data_with_mantra()
         notifier.notify(telegram_token, telegram_chat_id, "(+) URL scan completed")
         logger.info("URL scan completed")
 

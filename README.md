@@ -50,6 +50,46 @@ falcon -h
    go build -o falcon ./cmd/falcon
    ```  
 
+## Updating
+
+Once you're on a recent build, updating is one command — it checks GitHub directly and self-updates from any directory:
+
+```bash
+falcon -up
+```
+
+It compares the commit baked into your binary against the latest on `main`. If you're behind, it pulls and rebuilds in place (inside a clone) or `go install`s the newest commit straight from GitHub.
+
+### Coming from an older version (one-time manual reinstall)
+
+Older binaries don't have `-up`, so do this once:
+
+1. **Remove the old binary** (check every location first):
+   ```bash
+   type -a falcon                       # lists all copies on your PATH
+   rm -f ~/go/bin/falcon /usr/local/bin/falcon ~/.local/bin/falcon
+   ```
+
+2. **Install the latest** — tip of `main`, no module-proxy lag:
+   ```bash
+   GOPROXY=direct go install github.com/OctaYus/FalconHunter/cmd/falcon@main
+   ```
+   *(or clone + build: `git clone https://github.com/OctaYus/FalconHunter && cd FalconHunter && go build -o ~/go/bin/falcon ./cmd/falcon/`)*
+
+3. **Install the JS-analysis dependencies** the new version uses:
+   ```bash
+   go install github.com/BishopFox/jsluice/cmd/jsluice@latest
+   go install github.com/OctaYus/depfusion@latest
+   # or just re-run: bash install.sh
+   ```
+
+4. **Verify:**
+   ```bash
+   which falcon && falcon -h | grep -E "mantra|update"
+   ```
+
+After that, every future update is just `falcon -up`.
+
 ## Notification Setup (Telegram, Discord, Slack)
 
 FalconHunter can send real-time alerts via Telegram, Discord, and Slack. Credentials are read from environment variables first, then from `config.yaml` as a fallback.

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -370,7 +371,7 @@ func makeDirectories(outputFile string) {
 
 	urlsFiles := []string{
 		"all-urls.txt", "js-files.txt", "leaked-docs.txt",
-		"mantra_output.txt", "params.txt",
+		"mantra_output.txt", "jsluice-secrets.txt", "jsluice-urls.txt", "params.txt",
 		"gf-xss.txt", "gf-ssrf.txt", "gf-lfi.txt",
 		"gf-ssti.txt", "gf-sqli.txt", "gf-redirect.txt",
 	}
@@ -404,72 +405,179 @@ func makeDirectories(outputFile string) {
 
 // ─── update ──────────────────────────────────────────────────────────────────
 
-// repoDir returns the directory of the FalconHunter checkout. The binary
-// usually lives in cmd/falcon/, so we walk upward looking for a .git folder.
+// repoDir returns the directory of the FalconHunter checkout. The binary is
+// often installed into ~/go/bin, far from the source tree, so we try several
+// candidate roots and walk upward from each looking for a .git folder.
 func repoDir() string {
-	exe, err := os.Executable()
-	start := ""
-	if err == nil {
-		start = filepath.Dir(exe)
-	}
-	if cwd, err := os.Getwd(); err == nil && start == "" {
-		start = cwd
-	}
-	dir := start
-	for i := 0; i < 6 && dir != "" && dir != "/"; i++ {
-		if st, err := os.Stat(filepath.Join(dir, ".git")); err == nil && st.IsDir() {
-			return dir
+	// findGit walks upward from start looking for a .git directory.
+	findGit := func(start string) string {
+		dir := start
+		for i := 0; i < 8 && dir != "" && dir != "/"; i++ {
+			if st, err := os.Stat(filepath.Join(dir, ".git")); err == nil && st.IsDir() {
+				return dir
+			}
+			dir = filepath.Dir(dir)
 		}
-		dir = filepath.Dir(dir)
+		return ""
 	}
+
+	// 1) Directory of the running executable (works for in-tree builds).
+	if exe, err := os.Executable(); err == nil {
+		if got := findGit(filepath.Dir(exe)); got != "" {
+			return got
+		}
+	}
+	// 2) Build-time source path baked in by the compiler. For a binary built
+	//    from source on this machine, this points at the real checkout even
+	//    when the binary was installed elsewhere (e.g. ~/go/bin).
+	if _, file, _, ok := runtime.Caller(0); ok && file != "" {
+		if got := findGit(filepath.Dir(file)); got != "" {
+			return got
+		}
+	}
+	// 3) Current working directory as a last resort.
 	if cwd, err := os.Getwd(); err == nil {
+		if got := findGit(cwd); got != "" {
+			return got
+		}
 		return cwd
 	}
-	return start
+	return ""
+}
+
+const (
+	repoModule = "github.com/OctaYus/FalconHunter"
+	repoBranch = "main"
+	repoURL    = "https://github.com/OctaYus/FalconHunter"
+)
+
+// builtRevision returns the VCS commit this binary was built from (baked in by
+// the Go toolchain), or "" if the info is unavailable (e.g. built with -trimpath
+// outside a git tree).
+func builtRevision() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" {
+				return s.Value
+			}
+		}
+	}
+	return ""
+}
+
+// remoteRevision asks GitHub for the latest commit SHA on the default branch
+// without needing a local checkout. Uses git ls-remote (no API rate limit).
+func remoteRevision() (string, error) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return "", fmt.Errorf("git not found in PATH")
+	}
+	out, stderr, err := run(60*time.Second, "git", "ls-remote", repoURL, repoBranch)
+	if err != nil {
+		msg := strings.TrimSpace(string(stderr))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf(msg)
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("empty response from %s", repoURL)
+	}
+	return fields[0], nil
 }
 
 func updateTool() bool {
+	fmt.Println(green("(+) Checking " + repoURL + " for updates..."))
+
+	remote, err := remoteRevision()
+	if err != nil {
+		fmt.Println(red("(-) Could not reach GitHub: " + err.Error()))
+		return false
+	}
+
+	local := builtRevision()
+	if local != "" {
+		fmt.Println(skyBlue("(i) Installed commit: " + shortSHA(local)))
+	}
+	fmt.Println(skyBlue("(i) Latest on " + repoBranch + ":  " + shortSHA(remote)))
+
+	if local != "" && strings.HasPrefix(remote, local) || local == remote {
+		fmt.Println(green("(+) FalconHunter is already up to date (" + shortSHA(remote) + ")"))
+		return true
+	}
+
+	// Fast path: if we're inside a git checkout, pull + rebuild in place.
 	dir := repoDir()
-	fmt.Println(green("(+) Updating FalconHunter in " + dir))
-
-	if st, err := os.Stat(filepath.Join(dir, ".git")); err != nil || !st.IsDir() {
-		fmt.Println(red("(-) Not a git checkout — clone the repo to use -up"))
-		fmt.Println("    git clone https://github.com/octayus/FalconHunter " + dir)
-		return false
+	if st, err := os.Stat(filepath.Join(dir, ".git")); err == nil && st.IsDir() {
+		if updateFromCheckout(dir, local, remote) {
+			return true
+		}
+		// fall through to go install on failure
 	}
 
+	// Otherwise fetch and (re)install straight from GitHub, like subfinder/nuclei.
+	return updateViaGoInstall(remote)
+}
+
+// updateFromCheckout pulls the latest commit in a local clone and rebuilds the
+// running binary in place.
+func updateFromCheckout(dir, before, remote string) bool {
 	if _, err := exec.LookPath("git"); err != nil {
-		fmt.Println(red("(-) git not found in PATH — cannot self-update"))
 		return false
 	}
-
-	head := func() string {
-		out, _, _ := run(30*time.Second, "git", "-C", dir, "rev-parse", "HEAD")
-		return strings.TrimSpace(string(out))
-	}
-	before := head()
-
+	fmt.Println(green("(+) Updating local checkout in " + dir))
 	stdout, stderr, err := run(2*time.Minute, "git", "-C", dir, "pull", "--ff-only")
 	if err != nil {
 		msg := strings.TrimSpace(string(stderr))
 		if msg == "" {
 			msg = strings.TrimSpace(string(stdout))
 		}
-		fmt.Println(red("(-) git pull failed: " + msg))
+		fmt.Println(red("(-) git pull failed: " + msg + " — falling back to go install"))
 		return false
 	}
-
-	after := head()
-	if before == after {
-		fmt.Println(skyBlue("(i) FalconHunter is already up to date (" + shortSHA(after) + ")"))
-		return true
+	out, _, _ := run(30*time.Second, "git", "-C", dir, "rev-parse", "HEAD")
+	after := strings.TrimSpace(string(out))
+	if before != "" {
+		if log, _, _ := run(30*time.Second, "git", "-C", dir, "log", "--oneline", before+".."+after); strings.TrimSpace(string(log)) != "" {
+			fmt.Println(strings.TrimSpace(string(log)))
+		}
+	}
+	// Rebuild and reinstall the running binary.
+	target := filepath.Join(dir, "cmd", "falcon", "falcon")
+	if exe, err := os.Executable(); err == nil {
+		target = exe
+	}
+	fmt.Println(green("(+) Rebuilding " + target))
+	if _, bstderr, berr := run(5*time.Minute, "go", "build", "-C", dir, "-o", target, "./cmd/falcon/"); berr != nil {
+		fmt.Println(red("(-) Build failed: " + strings.TrimSpace(string(bstderr))))
+		return false
 	}
 	fmt.Println(green("(+) Updated " + shortSHA(before) + " → " + shortSHA(after)))
-	log, _, _ := run(30*time.Second, "git", "-C", dir, "log", "--oneline", before+".."+after)
-	if s := strings.TrimSpace(string(log)); s != "" {
-		fmt.Println(s)
+	return true
+}
+
+// updateViaGoInstall fetches the latest commit from GitHub through the Go
+// toolchain and installs it into GOBIN, replacing the running binary.
+func updateViaGoInstall(remote string) bool {
+	if _, err := exec.LookPath("go"); err != nil {
+		fmt.Println(red("(-) go toolchain not found in PATH — cannot self-update"))
+		fmt.Println("    Install Go, or clone the repo and rebuild:")
+		fmt.Println("    git clone " + repoURL + " && cd FalconHunter && go build -o falcon ./cmd/falcon/")
+		return false
 	}
-	fmt.Println(skyBlue("(i) Rebuild the binary: go build -o cmd/falcon/falcon ./cmd/falcon/"))
+	pkg := repoModule + "/cmd/falcon@" + remote
+	fmt.Println(green("(+) Installing " + pkg))
+	cmd := exec.Command("go", "install", pkg)
+	// GOPROXY=direct avoids module-proxy lag so we get the exact tip commit.
+	cmd.Env = append(os.Environ(), "GOPROXY=direct", "GOFLAGS=")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Println(red("(-) go install failed: " + err.Error()))
+		return false
+	}
+	fmt.Println(green("(+) Updated to " + shortSHA(remote)))
+	fmt.Println(skyBlue("(i) Binary installed in $(go env GOBIN) / $GOPATH/bin"))
 	return true
 }
 
@@ -483,7 +591,7 @@ func shortSHA(sha string) string {
 func checkTools() bool {
 	required := []string{"subfinder", "httpx", "waybackurls", "anew"}
 	optional := []string{
-		"gau", "gf", "cnfinder", "BadAuth0", "mantra", "katana",
+		"gau", "gf", "cnfinder", "BadAuth0", "mantra", "jsluice", "depfusion", "katana",
 		"nuclei", "s3scanner", "aws_extractor", "ffuf",
 		"corsy", "crlfuzz", "dirsearch", "bypass-403", "kr",
 		"dalfox", "openredirex", "paramspider", "secretfinder",
@@ -1188,50 +1296,20 @@ func collectURLs(domainsFile, outputFile string) {
 		results := make(chan urlCollectResult, 4)
 		var wg sync.WaitGroup
 
-		// waybackurls
+		// waybackurls — via `cat <domains> | waybackurls | anew <file>` pipeline
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if !toolInPath("waybackurls") {
-				logWarn(red("(-) waybackurls not found in PATH"))
-				results <- urlCollectResult{"urls", nil}
-				return
-			}
-			if len(domInput) == 0 {
-				results <- urlCollectResult{"urls", nil}
-				return
-			}
-			stdout, stderr, err := runWithStdin(10*time.Minute, domInput, "waybackurls")
-			if err != nil {
-				logWarn("waybackurls: " + err.Error())
-				if len(stderr) > 0 {
-					logDebug("waybackurls stderr: " + string(stderr))
-				}
-			}
-			results <- urlCollectResult{"urls", bytes.TrimSpace(stdout)}
+			results <- urlCollectResult{"urls",
+				pipelineCollect(domInput, outputFile, "waybackurls", "waybackurls", ".waybackurls.txt")}
 		}()
 
-		// gau
+		// gau — via `cat <domains> | gau --subs | anew <file>` pipeline
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if !toolInPath("gau") {
-				logWarn(red("(-) gau not found in PATH"))
-				results <- urlCollectResult{"urls", nil}
-				return
-			}
-			if len(domInput) == 0 {
-				results <- urlCollectResult{"urls", nil}
-				return
-			}
-			stdout, stderr, err := runWithStdin(10*time.Minute, domInput, "gau", "--subs")
-			if err != nil {
-				logWarn("gau: " + err.Error())
-				if len(stderr) > 0 {
-					logDebug("gau stderr: " + string(stderr))
-				}
-			}
-			results <- urlCollectResult{"urls", bytes.TrimSpace(stdout)}
+			results <- urlCollectResult{"urls",
+				pipelineCollect(domInput, outputFile, "gau", "gau --subs", ".gau.txt")}
 		}()
 
 		// waymore
@@ -1428,6 +1506,163 @@ func extractDocuments(outputFile string) {
 // shQuote escapes a path for safe inclusion in a bash -c command.
 func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// pipelineCollect runs `cat <domains> | <pipeCmd> | anew <perToolFile>` through a
+// bash pipeline — the most reliable way to plumb cat|tool|anew across builds of
+// waybackurls/gau. Each tool writes to its own file so the parallel pipelines
+// never anew the shared all-urls.txt at the same time; the bytes are returned
+// for the caller to merge serially.
+func pipelineCollect(domInput []byte, outputFile, toolName, pipeCmd, outBasename string) []byte {
+	if !toolInPath(toolName) {
+		logWarn(red("(-) " + toolName + " not found in PATH"))
+		return nil
+	}
+	if len(domInput) == 0 {
+		return nil
+	}
+	tmp, err := os.CreateTemp("", "falcon-dom-*.txt")
+	if err != nil {
+		return nil
+	}
+	tmp.Write(domInput)
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+
+	toolOut := filepath.Join(outputFile, "urls", outBasename)
+	shellCmd := fmt.Sprintf("cat %s | %s | anew %s",
+		shQuote(tmp.Name()), pipeCmd, shQuote(toolOut))
+	cmd := exec.Command("bash", "-c", shellCmd)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		logWarn(red("(-) " + toolName + " failed to start: " + err.Error()))
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			logDebug(toolName + " pipeline exit: " + err.Error())
+		}
+	case <-time.After(10 * time.Minute):
+		_ = cmd.Process.Kill()
+		logWarn(red("(-) " + toolName + " timed out"))
+	}
+	data, _ := os.ReadFile(toolOut)
+	return bytes.TrimSpace(data)
+}
+
+// extractJSDataWithJsluice is the default lightweight JS scanner. jsluice
+// (BishopFox) fetches the JS URLs itself and parses them with tree-sitter, so
+// it is far faster and lighter on CPU/RAM than mantra.
+func extractJSDataWithJsluice(outputFile string) {
+	jsluice := findGoBin("jsluice")
+	if !toolInPath(jsluice) {
+		logWarn(red("(-) jsluice not found in PATH, skipping"))
+		return
+	}
+	jsOutput := filepath.Join(outputFile, "urls", "js-files.txt")
+	if !fileExistsNonEmpty(jsOutput) {
+		logWarn(red("(-) js-files.txt empty, skipping jsluice"))
+		return
+	}
+	urls, err := readLines(jsOutput)
+	if err != nil || len(urls) == 0 {
+		logInfo(skyBlue("(-) jsluice: no JS URLs to scan"))
+		return
+	}
+	logInfo(green(fmt.Sprintf("[+] jsluice: scanning %d JS URL(s) for secrets + endpoints", len(urls))))
+
+	runMode := func(mode string) []string {
+		var lines []string
+		const batchSize = 60
+		for i := 0; i < len(urls); i += batchSize {
+			end := i + batchSize
+			if end > len(urls) {
+				end = len(urls)
+			}
+			cmdArgs := append([]string{mode, "-c", "10", "-i"}, urls[i:end]...)
+			stdout, _, err := run(5*time.Minute, jsluice, cmdArgs...)
+			if err != nil {
+				logDebug("jsluice " + mode + " batch: " + err.Error())
+			}
+			for _, ln := range strings.Split(string(stdout), "\n") {
+				if strings.TrimSpace(ln) != "" {
+					lines = append(lines, ln)
+				}
+			}
+		}
+		return lines
+	}
+
+	// Secrets — primary output (direct mantra replacement)
+	secretLines := runMode("secrets")
+	secretsOut := filepath.Join(outputFile, "urls", "jsluice-secrets.txt")
+	if len(secretLines) > 0 {
+		os.WriteFile(secretsOut, []byte(strings.Join(secretLines, "\n")+"\n"), 0644)
+		high := 0
+		for _, ln := range secretLines {
+			var obj struct {
+				Kind     string `json:"kind"`
+				Severity string `json:"severity"`
+			}
+			if json.Unmarshal([]byte(ln), &obj) == nil {
+				sev := strings.ToLower(obj.Severity)
+				if sev == "high" || sev == "medium" {
+					high++
+					logInfo(red("[!] jsluice secret (" + sev + "): " + obj.Kind))
+				}
+			}
+		}
+		logInfo(red(fmt.Sprintf("[!] jsluice: %d secret finding(s) (%d medium/high) → %s",
+			len(secretLines), high, secretsOut)))
+	} else {
+		logInfo(green("(+) jsluice: no secrets found in JS files"))
+	}
+
+	// Endpoints/URLs — bonus surface, same tool, near-zero extra cost
+	urlLines := runMode("urls")
+	if len(urlLines) > 0 {
+		urlsOut := filepath.Join(outputFile, "urls", "jsluice-urls.txt")
+		os.WriteFile(urlsOut, []byte(strings.Join(urlLines, "\n")+"\n"), 0644)
+		logInfo(green(fmt.Sprintf("[+] jsluice: %d endpoint(s) → %s", len(urlLines), urlsOut)))
+	}
+}
+
+// dependencyConfusionDepfusion scans JS + sourcemap URLs for dependency
+// confusion via depfusion (OctaYus) — parses npm package refs and checks the
+// registry for claimable (unregistered) packages.
+func dependencyConfusionDepfusion(outputFile string) {
+	depfusion := findGoBin("depfusion")
+	if !toolInPath(depfusion) {
+		logWarn(red("(-) depfusion not found in PATH, skipping"))
+		return
+	}
+	jsOutput := filepath.Join(outputFile, "urls", "js-files.txt")
+	if !fileExistsNonEmpty(jsOutput) {
+		logWarn(red("(-) js-files.txt empty, skipping depfusion"))
+		return
+	}
+	outDir := filepath.Join(outputFile, "urls", "depfusion")
+	os.MkdirAll(outDir, 0755)
+	absJS, _ := filepath.Abs(jsOutput)
+	logInfo(green("(+) Running depfusion (dependency confusion)"))
+	if _, stderr, err := run(15*time.Minute, depfusion,
+		"-f", absJS, "-o", outDir, "-workers", "40", "-no-color"); err != nil {
+		logDebug("depfusion: " + err.Error())
+		if len(stderr) > 0 {
+			logDebug("depfusion stderr: " + string(stderr))
+		}
+	}
+	claimable := filepath.Join(outDir, "claimable.txt")
+	if fileExistsNonEmpty(claimable) {
+		logInfo(red(fmt.Sprintf("[!] depfusion: %d claimable package(s) → %s",
+			countLines(claimable), claimable)))
+	} else {
+		logInfo(green("(+) depfusion: no claimable packages found"))
+	}
 }
 
 func extractJSDataWithMantra(outputFile string) {
@@ -2730,6 +2965,7 @@ type Args struct {
 	update      bool
 	cleanupOnly bool
 	nuclei      bool
+	mantra      bool
 	ffuf        bool
 	wordlist    string
 	cors        bool
@@ -2768,6 +3004,7 @@ func parseArgs() Args {
 	flag.BoolVar(&a.update, "update", false, "Update FalconHunter to the latest version and exit")
 	flag.BoolVar(&a.cleanupOnly, "cleanup-only", false, "Run only cleanup on existing output directory")
 	flag.BoolVar(&a.nuclei, "nuclei", false, "Run Nuclei scans (optional)")
+	flag.BoolVar(&a.mantra, "mantra", false, "Run mantra for JS secret extraction (heavy; jsluice runs by default instead)")
 	flag.BoolVar(&a.ffuf, "ffuf", false, "Run ffuf directory fuzzing (optional)")
 	flag.StringVar(&a.wordlist, "wordlist", "", "Wordlist for ffuf")
 	flag.BoolVar(&a.cors, "cors", false, "Run CORS misconfiguration scan")
@@ -2815,6 +3052,9 @@ func main() {
 		}
 		if !skipSet["nuclei"] {
 			args.nuclei = true
+		}
+		if !skipSet["mantra"] {
+			args.mantra = true
 		}
 		if !skipSet["ffuf"] {
 			args.ffuf = true
@@ -2979,7 +3219,12 @@ func main() {
 		extractJSFiles(outputFile)
 		awsExtractor(outputFile)
 		extractDocuments(outputFile)
-		extractJSDataWithMantra(outputFile)
+		// jsluice is the default lightweight JS scanner; mantra is opt-in (-mantra).
+		extractJSDataWithJsluice(outputFile)
+		dependencyConfusionDepfusion(outputFile)
+		if args.mantra {
+			extractJSDataWithMantra(outputFile)
+		}
 		notifier.notify("(+) URL scan completed")
 	})
 
