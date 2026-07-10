@@ -1267,24 +1267,41 @@ func filterURLsByRegex(urlsFile string, patternStr string, destFile string) {
 
 type urlCollectResult struct {
 	dest string
-	data []byte
+	data string // per-tool output file path ("" if the tool produced nothing)
 }
 
 func collectURLs(domainsFile, outputFile string) {
 	subdomainsFile := filepath.Join(outputFile, "hosts", "alive-hosts.txt")
-	allURLs := filepath.Join(outputFile, "urls", "all-urls.txt")
-	paramsOut := filepath.Join(outputFile, "urls", "params.txt")
+	urlsDir := filepath.Join(outputFile, "urls")
+	allURLs := filepath.Join(urlsDir, "all-urls.txt")
+	paramsOut := filepath.Join(urlsDir, "params.txt")
+	katanaOut := filepath.Join(urlsDir, ".katana.txt")
 
-	// katana
+	// Per-tool output files, merged into all-urls.txt / params.txt at the end
+	// with a streaming `sort -u`. We never hold the (potentially multi-GB) URL
+	// set in memory — that in-RAM buffering is what got the process OOM-Killed
+	// ("Killed") on large targets.
+	urlFiles := []string{katanaOut}
+	var paramFiles []string
+
+	// katana — -ct (crawl-duration) makes katana stop *gracefully* and flush its
+	// output; the outer timeout is only a hard backstop. Depth 5 + JS-crawl
+	// exploded combinatorially and never finished in 30 min, so cap depth,
+	// concurrency and rate, and give each request its own timeout.
 	logInfo(green("(+) Collecting all URLs (katana)"))
-	if err := runInherit(30*time.Minute, "katana",
+	if err := runInherit(25*time.Minute, "katana",
 		"-list", subdomainsFile,
-		"-d", "5",
+		"-d", "3", // crawl depth (was 5 — never converged)
 		"-jc",
 		"-fx",
-		"-o", allURLs,
+		"-c", "15", // parallel workers
+		"-rl", "150", // requests/sec cap
+		"-timeout", "10", // per-request timeout (s)
+		"-ct", "1200", // stop crawling after 20 min, keep results
+		"-silent",
+		"-o", katanaOut,
 	); err != nil {
-		logWarn(red("(-) katana: " + err.Error()))
+		logWarn(red("(-) katana: " + err.Error() + " (using partial output)"))
 	}
 
 	if !fileExistsNonEmpty(subdomainsFile) {
@@ -1308,6 +1325,7 @@ func collectURLs(domainsFile, outputFile string) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			ensureGauConfig()
 			results <- urlCollectResult{"urls",
 				pipelineCollect(domInput, outputFile, "gau", "gau --subs", ".gau.txt")}
 		}()
@@ -1317,41 +1335,64 @@ func collectURLs(domainsFile, outputFile string) {
 		go func() {
 			defer wg.Done()
 			if !toolInPath("waymore") {
-				results <- urlCollectResult{"urls", nil}
+				results <- urlCollectResult{"urls", ""}
 				return
 			}
 			logInfo(green("(+) Running waymore for URL collection"))
 			hosts, err := readLines(subdomainsFile)
 			if err != nil {
-				results <- urlCollectResult{"urls", nil}
+				results <- urlCollectResult{"urls", ""}
 				return
 			}
-			var collected []byte
-			deadline := time.Now().Add(30 * time.Minute)
+			// Collapse hosts to unique registrable domains: waymore queries
+			// archives per-domain, so running it once per subdomain repeats the
+			// same work and blows the time budget (why the timeout kept firing).
+			seen := map[string]bool{}
+			var domains []string
 			for _, host := range hosts {
+				d := host
+				if u, err := url.Parse(host); err == nil && u.Host != "" {
+					d = u.Host
+				}
+				if i := strings.IndexByte(d, ':'); i >= 0 {
+					d = d[:i]
+				}
+				d = strings.ToLower(strings.TrimSpace(d))
+				if d != "" && !seen[d] {
+					seen[d] = true
+					domains = append(domains, d)
+				}
+			}
+			waymoreOut := filepath.Join(urlsDir, ".waymore.txt")
+			agg, err := os.OpenFile(waymoreOut, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				results <- urlCollectResult{"urls", ""}
+				return
+			}
+			deadline := time.Now().Add(30 * time.Minute)
+			for _, domain := range domains {
 				if time.Now().After(deadline) {
 					logWarn("waymore global timeout reached, stopping early")
 					break
-				}
-				u, err := url.Parse(host)
-				domain := host
-				if err == nil && u.Host != "" {
-					domain = u.Host
 				}
 				tmp, err := os.CreateTemp("", "waymore-*.txt")
 				if err != nil {
 					continue
 				}
 				tmp.Close()
-				_, _, err = run(5*time.Minute, "waymore", "-i", domain, "-mode", "U", "-oU", tmp.Name())
-				if err != nil {
+				if _, _, err := run(5*time.Minute, "waymore", "-i", domain, "-mode", "U", "-oU", tmp.Name()); err != nil {
 					logDebug("waymore timed out for " + domain)
 				}
-				data, _ := os.ReadFile(tmp.Name())
-				collected = append(collected, data...)
+				// Stream the per-domain file into the aggregate — never load it
+				// all into memory.
+				if in, err := os.Open(tmp.Name()); err == nil {
+					io.Copy(agg, in)
+					in.Close()
+				}
 				os.Remove(tmp.Name())
 			}
-			results <- urlCollectResult{"urls", collected}
+			agg.Close()
+			results <- urlCollectResult{"urls", waymoreOut}
 		}()
 
 		// paramspider
@@ -1360,13 +1401,13 @@ func collectURLs(domainsFile, outputFile string) {
 			defer wg.Done()
 			if !toolInPath("paramspider") {
 				logWarn(red("(-) paramspider not found in PATH"))
-				results <- urlCollectResult{"params", nil}
+				results <- urlCollectResult{"params", ""}
 				return
 			}
 			logInfo(green("(+) Running paramspider for parameter discovery"))
 			tmpDir, err := os.MkdirTemp("", "paramspider-*")
 			if err != nil {
-				results <- urlCollectResult{"params", nil}
+				results <- urlCollectResult{"params", ""}
 				return
 			}
 			defer os.RemoveAll(tmpDir)
@@ -1384,17 +1425,23 @@ func collectURLs(domainsFile, outputFile string) {
 				cmd.Process.Kill()
 			}
 
-			var data []byte
+			paramOut := filepath.Join(urlsDir, ".paramspider.txt")
 			resultsDir := filepath.Join(tmpDir, "results")
 			entries, err := os.ReadDir(resultsDir)
-			if err == nil {
-				for _, e := range entries {
-					p := filepath.Join(resultsDir, e.Name())
-					b, _ := os.ReadFile(p)
-					data = append(data, b...)
+			if err == nil && len(entries) > 0 {
+				if agg, err := os.OpenFile(paramOut, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+					for _, e := range entries {
+						if in, err := os.Open(filepath.Join(resultsDir, e.Name())); err == nil {
+							io.Copy(agg, in)
+							in.Close()
+						}
+					}
+					agg.Close()
+					results <- urlCollectResult{"params", paramOut}
+					return
 				}
 			}
-			results <- urlCollectResult{"params", data}
+			results <- urlCollectResult{"params", ""}
 		}()
 
 		go func() {
@@ -1403,15 +1450,20 @@ func collectURLs(domainsFile, outputFile string) {
 		}()
 
 		for r := range results {
-			if len(r.data) == 0 {
+			if r.data == "" {
 				continue
 			}
-			target := allURLs
 			if r.dest == "params" {
-				target = paramsOut
+				paramFiles = append(paramFiles, r.data)
+			} else {
+				urlFiles = append(urlFiles, r.data)
 			}
-			runAnew(target, r.data)
 		}
+
+		// Merge each tool's on-disk output into the final files with a
+		// streaming, disk-backed `sort -u`. No large buffers in memory.
+		mergeSortUnique(allURLs, urlFiles, urlsDir)
+		mergeSortUnique(paramsOut, paramFiles, urlsDir)
 	}
 
 	// gf patterns
@@ -1427,19 +1479,23 @@ func collectURLs(domainsFile, outputFile string) {
 				go func() {
 					defer wg.Done()
 					outFile := filepath.Join(gfOutputDir, "gf-"+pattern+".txt")
-					data, err := os.ReadFile(allURLs)
-					if err != nil {
+					// Stream `cat all-urls | gf <pattern> | anew <out>` so we never
+					// load the whole URL list (×6 patterns) into memory at once.
+					shellCmd := fmt.Sprintf("cat %s | gf %s | anew %s",
+						shQuote(allURLs), shQuote(pattern), shQuote(outFile))
+					cmd := exec.Command("bash", "-c", shellCmd)
+					cmd.Stdout = io.Discard
+					cmd.Stderr = io.Discard
+					if err := cmd.Start(); err != nil {
 						return
 					}
-					stdout, _, err := runWithStdin(5*time.Minute, data, "gf", pattern)
-					if err != nil {
-						if !strings.Contains(err.Error(), "exit status") {
-							logWarn("gf " + pattern + " failed: " + err.Error())
-						}
-						return
-					}
-					if len(bytes.TrimSpace(stdout)) > 0 {
-						runAnew(outFile, stdout)
+					done := make(chan error, 1)
+					go func() { done <- cmd.Wait() }()
+					select {
+					case <-done:
+					case <-time.After(5 * time.Minute):
+						_ = cmd.Process.Kill()
+						logWarn("gf " + pattern + " timed out")
 					}
 				}()
 			}
@@ -1510,20 +1566,22 @@ func shQuote(s string) string {
 
 // pipelineCollect runs `cat <domains> | <pipeCmd> | anew <perToolFile>` through a
 // bash pipeline — the most reliable way to plumb cat|tool|anew across builds of
-// waybackurls/gau. Each tool writes to its own file so the parallel pipelines
-// never anew the shared all-urls.txt at the same time; the bytes are returned
-// for the caller to merge serially.
-func pipelineCollect(domInput []byte, outputFile, toolName, pipeCmd, outBasename string) []byte {
+// waybackurls/gau. It writes straight to disk and returns the per-tool file path
+// (empty on failure); the output is never read back into memory. Previously we
+// buffered the whole file and re-piped it to anew, doubling memory usage and
+// triggering the OOM-Kill on large targets. Partial output on timeout is kept
+// because anew writes incrementally.
+func pipelineCollect(domInput []byte, outputFile, toolName, pipeCmd, outBasename string) string {
 	if !toolInPath(toolName) {
 		logWarn(red("(-) " + toolName + " not found in PATH"))
-		return nil
+		return ""
 	}
 	if len(domInput) == 0 {
-		return nil
+		return ""
 	}
 	tmp, err := os.CreateTemp("", "falcon-dom-*.txt")
 	if err != nil {
-		return nil
+		return ""
 	}
 	tmp.Write(domInput)
 	tmp.Close()
@@ -1537,7 +1595,7 @@ func pipelineCollect(domInput []byte, outputFile, toolName, pipeCmd, outBasename
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		logWarn(red("(-) " + toolName + " failed to start: " + err.Error()))
-		return nil
+		return ""
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -1546,12 +1604,103 @@ func pipelineCollect(domInput []byte, outputFile, toolName, pipeCmd, outBasename
 		if err != nil {
 			logDebug(toolName + " pipeline exit: " + err.Error())
 		}
-	case <-time.After(10 * time.Minute):
+	case <-time.After(15 * time.Minute):
 		_ = cmd.Process.Kill()
-		logWarn(red("(-) " + toolName + " timed out"))
+		logWarn(red("(-) " + toolName + " timed out; using partial output"))
 	}
-	data, _ := os.ReadFile(toolOut)
-	return bytes.TrimSpace(data)
+	if !fileExistsNonEmpty(toolOut) {
+		return ""
+	}
+	return toolOut
+}
+
+// ensureGauConfig drops a default ~/.gau.toml so gau stops printing
+// "Config file /root/.gau.toml not found" on every run.
+func ensureGauConfig() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	cfg := filepath.Join(home, ".gau.toml")
+	if fileExistsNonEmpty(cfg) {
+		return
+	}
+	content := "threads = 5\n" +
+		"verbose = false\n" +
+		"retries = 3\n" +
+		"providers = [\"wayback\",\"commoncrawl\",\"otx\",\"urlscan\"]\n" +
+		"blacklist = [\"ttf\",\"woff\",\"svg\",\"png\",\"jpg\",\"gif\"]\n\n" +
+		"[urlscan]\n  apikey = \"\"\n\n" +
+		"[filters]\n  from = \"\"\n  to = \"\"\n"
+	if err := os.WriteFile(cfg, []byte(content), 0644); err != nil {
+		logDebug("could not write default gau config: " + err.Error())
+	}
+}
+
+// mergeSortUnique merges the per-tool files into dest with `sort -u`, which
+// streams and spills to disk (via -T) rather than buffering everything in RAM —
+// this is what keeps large runs from being OOM-Killed. Falls back to a streaming
+// anew per file if the `sort` binary is unavailable.
+func mergeSortUnique(dest string, sources []string, tmpDir string) {
+	var inputs []string
+	for _, s := range sources {
+		if s != "" && fileExistsNonEmpty(s) {
+			inputs = append(inputs, s)
+		}
+	}
+	if fileExistsNonEmpty(dest) {
+		inputs = append(inputs, dest)
+	}
+	if len(inputs) == 0 {
+		return
+	}
+
+	tmp, err := os.CreateTemp(tmpDir, "*.merge")
+	if err != nil {
+		logDebug("merge: could not create temp file: " + err.Error())
+		return
+	}
+	tmpName := tmp.Name()
+	tmp.Close()
+
+	args := append([]string{"-u", "-T", tmpDir}, inputs...)
+	cmd := exec.Command("sort", args...)
+	out, err := os.Create(tmpName)
+	if err != nil {
+		os.Remove(tmpName)
+		return
+	}
+	cmd.Stdout = out
+	cmd.Stderr = io.Discard
+	runErr := cmd.Run()
+	out.Close()
+
+	if runErr == nil {
+		if err := os.Rename(tmpName, dest); err != nil {
+			logDebug("merge: rename failed: " + err.Error())
+			os.Remove(tmpName)
+		}
+		return
+	}
+
+	// sort unavailable/failed → stream each file through anew instead.
+	logDebug("sort merge failed (" + runErr.Error() + "); falling back to anew")
+	os.Remove(tmpName)
+	for _, s := range inputs {
+		if s == dest {
+			continue
+		}
+		in, err := os.Open(s)
+		if err != nil {
+			continue
+		}
+		c := exec.Command("anew", dest)
+		c.Stdin = in
+		c.Stdout = io.Discard
+		c.Stderr = io.Discard
+		c.Run()
+		in.Close()
+	}
 }
 
 // extractJSDataWithJsluice is the default lightweight JS scanner. jsluice

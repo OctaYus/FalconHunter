@@ -246,8 +246,26 @@ install_git_py_tools() {
             mark_fail "$repo"; continue
         fi
         [[ -f "$dest/requirements.txt" ]] && _pip_install "$dest/requirements.txt"
+
+        # Package-style repos (e.g. ParamSpider ships paramspider/main.py plus a
+        # setup.py console entry point) have no top-level "${repo}.py", so the
+        # find below misses them and the tool never lands on PATH. Install those
+        # via pip so their console script is created.
+        if [[ -f "$dest/setup.py" || -f "$dest/pyproject.toml" ]]; then
+            if python3 -m pip install --help 2>&1 | grep -q 'break-system-packages'; then
+                python3 -m pip install -q --break-system-packages "$dest" 2>/tmp/pip_err || true
+            else
+                python3 -m pip install -q --user "$dest" 2>/tmp/pip_err || true
+            fi
+            if command -v "$repo" &>/dev/null; then
+                # console script may be in ~/.local/bin — symlink it onto PATH
+                [[ -x "$HOME/.local/bin/$repo" ]] && sudo ln -sf "$HOME/.local/bin/$repo" "/usr/local/bin/$repo"
+                mark_ok "$repo"; continue
+            fi
+        fi
+
         local main_py
-        main_py=$(find "$dest" -maxdepth 1 -iname "${repo}.py" | head -n1)
+        main_py=$(find "$dest" -maxdepth 2 -iname "${repo}.py" | head -n1)
         if [[ -n "$main_py" ]]; then
             chmod +x "$main_py"
             printf '#!/bin/bash\nexec python3 "%s" "$@"\n' "$main_py" \

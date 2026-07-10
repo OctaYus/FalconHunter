@@ -891,25 +891,43 @@ class UrlFinder:
     def collect_urls(self):
         """Collect URLs from various sources (wayback, gau, etc)"""
         subdomains_file = f"{self.output_file}/hosts/alive-hosts.txt"
-        urls = f"{self.output_file}/urls/all-urls.txt"
+        urls_dir = f"{self.output_file}/urls"
+        urls = f"{urls_dir}/all-urls.txt"
+        params_out = f"{urls_dir}/params.txt"
+        katana_out = f"{urls_dir}/.katana.txt"
+        # Per-tool output files, merged into all-urls.txt / params.txt at the end
+        # with a streaming `sort -u` so we never hold the (potentially multi-GB)
+        # URL set in memory — that in-RAM buffering is what got the process
+        # OOM-Killed ("Killed") on large targets.
+        url_files = [katana_out]
+        param_files = []
         try:
-            logger.info(f"{color.GREEN}(+) Collecting all URLs{color.END}")
-            depth_level = 5
+            logger.info(f"{color.GREEN}(+) Collecting all URLs (katana){color.END}")
+            # -ct (crawl-duration) makes katana stop *gracefully* and flush its
+            # output; the outer subprocess timeout is only a hard backstop. Depth
+            # 5 + JS-crawl exploded combinatorially and never finished within
+            # 30 min, so cap depth/concurrency/rate and give each request its
+            # own timeout.
             katana_cmd = [
                 "katana", "-list", subdomains_file,
-                "-d", str(depth_level),
-                "-jc",   # crawl JS files for endpoints
-                "-fx",   # extract form action targets
-                "-o", urls,
+                "-d", "3",            # crawl depth (was 5 — never converged)
+                "-jc",                # crawl JS files for endpoints
+                "-fx",                # extract form action targets
+                "-c", "15",           # parallel workers
+                "-rl", "150",         # requests/sec cap
+                "-timeout", "10",     # per-request timeout (s)
+                "-ct", "1200",        # stop crawling after 20 min, keep results
+                "-silent",
+                "-o", katana_out,
             ]
-            subprocess.run(katana_cmd, timeout=1800)
+            subprocess.run(katana_cmd, timeout=1500)
         except FileNotFoundError:
             logger.warning(
                 f"{color.RED}(-) katana not found in PATH{color.END}")
         except subprocess.CalledProcessError as e:
             logger.warning(f"{color.RED}(-) katana exited with code {e.returncode}{color.END}")
         except subprocess.TimeoutExpired:
-            logger.warning("katana timed out, skipping")
+            logger.warning("katana hit its hard timeout; using partial output")
 
         try:
             if not os.path.isfile(subdomains_file) or os.path.getsize(subdomains_file) == 0:
@@ -951,102 +969,184 @@ class UrlFinder:
                         logger.debug(f"could not read alive-hosts: {e}")
                     return ("\n".join(out) + "\n").encode() if out else b""
 
-                def _pipeline_collect(tool_name, pipe_cmd, out_basename):
-                    """Run `cat <domains> | <tool> | anew <out>` via a shell pipeline.
+                def _ensure_gau_config():
+                    """gau prints "Config file /root/.gau.toml not found" on every
+                    run when the config is absent. Drop a sane default so the run
+                    is quiet and reproducible."""
+                    cfg = os.path.expanduser("~/.gau.toml")
+                    if os.path.isfile(cfg):
+                        return
+                    try:
+                        with open(cfg, "w", encoding="utf-8") as cf:
+                            cf.write(
+                                'threads = 5\n'
+                                'verbose = false\n'
+                                'retries = 3\n'
+                                'providers = ["wayback","commoncrawl","otx","urlscan"]\n'
+                                'blacklist = ["ttf","woff","svg","png","jpg","gif"]\n\n'
+                                '[urlscan]\n  apikey = ""\n\n'
+                                '[filters]\n  from = ""\n  to = ""\n'
+                            )
+                    except Exception as e:
+                        logger.debug(f"could not write default gau config: {e}")
 
-                    Using shell=True is the only reliable way to get the
-                    cat | tool | anew plumbing to behave across builds of
-                    waybackurls/gau. Each tool writes to its own file so the
-                    two pipelines never anew the shared all-urls.txt at the same
-                    time; the per-tool file is then merged by the caller.
-                    """
+                def _merge_sort_unique(dest, sources):
+                    """Merge per-tool files into dest with `sort -u`, which streams
+                    and spills to disk (via -T) instead of buffering everything in
+                    RAM. Falls back to a streaming `anew` per file if sort is
+                    unavailable. This is what keeps large runs from OOM-Killing."""
+                    inputs = [s for s in sources
+                              if s and os.path.isfile(s) and os.path.getsize(s) > 0]
+                    if os.path.isfile(dest) and os.path.getsize(dest) > 0:
+                        inputs.append(dest)
+                    if not inputs:
+                        return
+                    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".merge", dir=urls_dir)
+                    os.close(tmp_fd)
+                    merged = False
+                    try:
+                        with open(tmp_path, "wb") as out:
+                            proc = subprocess.run(["sort", "-u", "-T", urls_dir, *inputs],
+                                                  stdout=out, stderr=subprocess.PIPE,
+                                                  timeout=1800)
+                        # Only trust the temp file if sort actually succeeded —
+                        # otherwise it may be empty/partial and must NOT overwrite
+                        # dest (that would silently destroy already-collected URLs).
+                        merged = proc.returncode == 0
+                        if not merged:
+                            logger.debug(
+                                f"sort merge exit {proc.returncode}: "
+                                f"{proc.stderr.decode(errors='replace').strip()}; "
+                                f"falling back to anew")
+                    except FileNotFoundError:
+                        logger.debug("sort not found; falling back to anew merge")
+                    except subprocess.TimeoutExpired:
+                        logger.warning("URL merge (sort) timed out; falling back to anew")
+                    if merged:
+                        os.replace(tmp_path, dest)
+                    else:
+                        if os.path.isfile(tmp_path):
+                            os.unlink(tmp_path)
+                        for s in inputs:
+                            if s == dest:
+                                continue
+                            try:
+                                with open(s, "rb") as sf:
+                                    subprocess.run(["anew", dest], stdin=sf, timeout=600)
+                            except Exception as e:
+                                logger.debug(f"anew merge fallback failed for {s}: {e}")
+
+                def _pipeline_collect(tool_name, pipe_cmd, out_basename):
+                    """Run `cat <domains> | <tool> | anew <file>` via a shell
+                    pipeline, writing straight to disk. The output is never read
+                    back into Python — we previously buffered the whole file and
+                    re-piped it to anew as `input=`, doubling memory and causing
+                    the OOM-Kill on large targets. Returns the per-tool file path
+                    (or None) for the caller to merge; partial output on timeout
+                    is kept because anew writes incrementally."""
                     if not shutil.which(tool_name):
                         logger.warning(f"{color.RED}(-) {tool_name} not found in PATH{color.END}")
-                        return ("urls", b"")
+                        return None
                     domains_input = _clean_domains()
                     if not domains_input:
-                        return ("urls", b"")
+                        return None
                     _fd, dom_tmp = tempfile.mkstemp(suffix=".txt")
                     os.write(_fd, domains_input)
                     os.close(_fd)
-                    tool_out = f"{self.output_file}/urls/{out_basename}"
+                    tool_out = f"{urls_dir}/{out_basename}"
                     cmd = (
                         f"cat {shlex.quote(dom_tmp)} | {pipe_cmd} "
                         f"| anew {shlex.quote(tool_out)}"
                     )
                     try:
-                        subprocess.run(cmd, shell=True, timeout=600)
+                        subprocess.run(cmd, shell=True, timeout=900)
                     except subprocess.TimeoutExpired:
-                        logger.warning(f"{tool_name} timed out, skipping")
+                        logger.warning(f"{tool_name} timed out; using partial output")
                     except subprocess.CalledProcessError as e:
                         logger.debug(f"{tool_name} pipeline exit: {e}")
                     finally:
                         if os.path.isfile(dom_tmp):
                             os.unlink(dom_tmp)
-                    data = b""
-                    if os.path.isfile(tool_out):
-                        with open(tool_out, "rb") as f:
-                            data = f.read()
-                    return ("urls", data)
+                    return tool_out
 
                 # Run waybackurls and gau in parallel, each via its own shell pipeline
                 def _run_waybackurls():
                     return _pipeline_collect("waybackurls", "waybackurls", ".waybackurls.txt")
 
                 def _run_gau():
+                    _ensure_gau_config()
                     return _pipeline_collect("gau", "gau --subs", ".gau.txt")
 
                 def _run_waymore():
                     if not shutil.which("waymore"):
-                        return ("urls", b"")
+                        return None
+                    waymore_out = f"{urls_dir}/.waymore.txt"
                     try:
                         logger.info(f"{color.GREEN}(+) Running waymore for URL collection{color.END}")
                         with open(subdomains_file, "r", encoding="utf-8") as sf:
                             hosts_list = [h.strip() for h in sf if h.strip()]
-                        collected = b""
-                        deadline = time.time() + 1800  # 30-min global cap for all hosts
+                        # Collapse hosts to unique registrable domains: waymore
+                        # queries archives per-domain, so running it once per
+                        # subdomain repeats the same work and blows the time budget
+                        # (that's why the global timeout kept getting hit).
+                        seen = set()
+                        domains = []
                         for host in hosts_list:
-                            if time.time() > deadline:
-                                logger.warning("waymore global timeout reached, stopping early")
-                                break
-                            domain = urlparse(host).netloc or host
-                            _fd, tmp_path = tempfile.mkstemp(suffix=".txt")
-                            os.close(_fd)
-                            try:
-                                subprocess.run(
-                                    ["waymore", "-i", domain, "-mode", "U", "-oU", tmp_path],
-                                    capture_output=True, timeout=300)
-                                if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0:
-                                    with open(tmp_path, "rb") as tf:
-                                        collected += tf.read()
-                            except subprocess.TimeoutExpired:
-                                logger.debug(f"waymore timed out for {domain}")
-                            finally:
-                                if os.path.isfile(tmp_path):
-                                    os.unlink(tmp_path)
-                        return ("urls", collected)
+                            d = (urlparse(host).netloc or host).split(":")[0].strip().lower()
+                            if d and d not in seen:
+                                seen.add(d)
+                                domains.append(d)
+                        deadline = time.time() + 1800  # 30-min global cap
+                        with open(waymore_out, "ab") as agg:
+                            for domain in domains:
+                                if time.time() > deadline:
+                                    logger.warning("waymore global timeout reached, stopping early")
+                                    break
+                                _fd, tmp_path = tempfile.mkstemp(suffix=".txt")
+                                os.close(_fd)
+                                try:
+                                    subprocess.run(
+                                        ["waymore", "-i", domain, "-mode", "U", "-oU", tmp_path],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL, timeout=300)
+                                    # Stream the per-domain file into the aggregate
+                                    # in fixed-size chunks — never load it all in RAM.
+                                    if os.path.isfile(tmp_path):
+                                        with open(tmp_path, "rb") as tf:
+                                            shutil.copyfileobj(tf, agg, 1024 * 1024)
+                                except subprocess.TimeoutExpired:
+                                    logger.debug(f"waymore timed out for {domain}")
+                                finally:
+                                    if os.path.isfile(tmp_path):
+                                        os.unlink(tmp_path)
+                        return waymore_out
                     except FileNotFoundError:
                         logger.warning(f"{color.RED}(-) waymore not found in PATH{color.END}")
                     except Exception as e:
                         logger.debug(f"waymore failed: {e}")
-                    return ("urls", b"")
+                    return None
 
                 def _run_paramspider():
+                    if not shutil.which("paramspider"):
+                        logger.warning(f"{color.RED}(-) paramspider not found in PATH{color.END}")
+                        return None
+                    param_out = f"{urls_dir}/.paramspider.txt"
                     tmp_dir = tempfile.mkdtemp()
                     try:
                         logger.info(f"{color.GREEN}(+) Running paramspider for parameter discovery{color.END}")
                         subprocess.run(
                             ["paramspider", "-l", subdomains_file],
-                            capture_output=True, timeout=600, cwd=tmp_dir)
-                        data = b""
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            timeout=600, cwd=tmp_dir)
                         results_dir = os.path.join(tmp_dir, "results")
                         if os.path.isdir(results_dir):
-                            for fname in sorted(os.listdir(results_dir)):
-                                fpath = os.path.join(results_dir, fname)
-                                if os.path.isfile(fpath):
-                                    with open(fpath, "rb") as fh:
-                                        data += fh.read()
-                        return ("params", data)
+                            with open(param_out, "ab") as agg:
+                                for fname in sorted(os.listdir(results_dir)):
+                                    fpath = os.path.join(results_dir, fname)
+                                    if os.path.isfile(fpath):
+                                        with open(fpath, "rb") as fh:
+                                            shutil.copyfileobj(fh, agg, 1024 * 1024)
+                        return param_out
                     except FileNotFoundError:
                         logger.warning(f"{color.RED}(-) paramspider not found in PATH{color.END}")
                     except subprocess.TimeoutExpired:
@@ -1055,27 +1155,32 @@ class UrlFinder:
                         logger.debug(f"paramspider failed: {e}")
                     finally:
                         shutil.rmtree(tmp_dir, ignore_errors=True)
-                    return ("params", b"")
+                    return None
 
                 logger.info(f"{color.GREEN}(+) Collecting URLs in parallel (waybackurls, gau, waymore, paramspider){color.END}")
-                params_out = f"{self.output_file}/urls/params.txt"
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
-                    futures = [
+                    url_futs = {
                         ex.submit(_run_waybackurls),
                         ex.submit(_run_gau),
                         ex.submit(_run_waymore),
-                        ex.submit(_run_paramspider),
-                    ]
-                    for fut in concurrent.futures.as_completed(futures):
+                    }
+                    param_fut = ex.submit(_run_paramspider)
+                    for fut in concurrent.futures.as_completed(list(url_futs) + [param_fut]):
                         try:
-                            dest, data = fut.result()
-                            if not data:
+                            path = fut.result()
+                            if not path:
                                 continue
-                            target = urls if dest == "urls" else params_out
-                            subprocess.run(["anew", target], input=data,
-                                           capture_output=True, timeout=60)
+                            if fut is param_fut:
+                                param_files.append(path)
+                            else:
+                                url_files.append(path)
                         except Exception as e:
                             logger.debug(f"URL collector thread failed: {e}")
+
+                # Merge each tool's on-disk output into the final files with a
+                # streaming, disk-backed `sort -u`. No large buffers in memory.
+                _merge_sort_unique(urls, url_files)
+                _merge_sort_unique(params_out, param_files)
 
             # Run gf patterns in parallel
             gf_list = ["xss", "ssrf", "lfi", "sqli", "ssti", "redirect"]
