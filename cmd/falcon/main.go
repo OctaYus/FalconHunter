@@ -656,8 +656,10 @@ func (sc *SubdomainsCollector) subfinderSubs() {
 		tmp, err := os.CreateTemp("", "amass-*.txt")
 		if err == nil {
 			tmp.Close()
+			// amass uses -df (domains file); -dL is a subfinder flag and makes
+			// amass abort with "flag provided but not defined: -dL".
 			stdout, stderr, err := run(10*time.Minute, "amass", "enum", "-passive",
-				"-nocolor", "-dL", sc.domains, "-o", tmp.Name())
+				"-nocolor", "-df", sc.domains, "-o", tmp.Name())
 			if err != nil {
 				if len(stderr) > 0 {
 					logDebug("amass stderr: " + string(stderr))
@@ -1284,12 +1286,11 @@ func collectURLs(domainsFile, outputFile string) {
 	urlFiles := []string{katanaOut}
 	var paramFiles []string
 
-	// katana — -ct (crawl-duration) makes katana stop *gracefully* and flush its
-	// output; the outer timeout is only a hard backstop. Depth 5 + JS-crawl
-	// exploded combinatorially and never finished in 30 min, so cap depth,
-	// concurrency and rate, and give each request its own timeout.
+	// katana — run to completion, no wall-clock timeout. Depth/concurrency/rate
+	// are still capped so the crawl converges, but katana finishes on its own
+	// instead of being killed partway through (timeout(0) disables the backstop).
 	logInfo(green("(+) Collecting all URLs (katana)"))
-	if err := runInherit(25*time.Minute, "katana",
+	if err := runInherit(0, "katana",
 		"-list", subdomainsFile,
 		"-d", "3", // crawl depth (was 5 — never converged)
 		"-jc",
@@ -1297,7 +1298,6 @@ func collectURLs(domainsFile, outputFile string) {
 		"-c", "15", // parallel workers
 		"-rl", "150", // requests/sec cap
 		"-timeout", "10", // per-request timeout (s)
-		"-ct", "1200", // stop crawling after 20 min, keep results
 		"-silent",
 		"-o", katanaOut,
 	); err != nil {
@@ -1369,19 +1369,15 @@ func collectURLs(domainsFile, outputFile string) {
 				results <- urlCollectResult{"urls", ""}
 				return
 			}
-			deadline := time.Now().Add(30 * time.Minute)
+			// Run waymore to completion per domain — no timeout.
 			for _, domain := range domains {
-				if time.Now().After(deadline) {
-					logWarn("waymore global timeout reached, stopping early")
-					break
-				}
 				tmp, err := os.CreateTemp("", "waymore-*.txt")
 				if err != nil {
 					continue
 				}
 				tmp.Close()
-				if _, _, err := run(5*time.Minute, "waymore", "-i", domain, "-mode", "U", "-oU", tmp.Name()); err != nil {
-					logDebug("waymore timed out for " + domain)
+				if _, _, err := run(0, "waymore", "-i", domain, "-mode", "U", "-oU", tmp.Name()); err != nil {
+					logDebug("waymore failed for " + domain + ": " + err.Error())
 				}
 				// Stream the per-domain file into the aggregate — never load it
 				// all into memory.
@@ -1412,18 +1408,12 @@ func collectURLs(domainsFile, outputFile string) {
 			}
 			defer os.RemoveAll(tmpDir)
 
+			// Run paramspider to completion — no timeout.
 			cmd := exec.Command("paramspider", "-l", subdomainsFile)
 			cmd.Dir = tmpDir
 			cmd.Stdout = io.Discard
 			cmd.Stderr = io.Discard
-			done := make(chan error, 1)
-			cmd.Start()
-			go func() { done <- cmd.Wait() }()
-			select {
-			case <-done:
-			case <-time.After(10 * time.Minute):
-				cmd.Process.Kill()
-			}
+			cmd.Run()
 
 			paramOut := filepath.Join(urlsDir, ".paramspider.txt")
 			resultsDir := filepath.Join(tmpDir, "results")
@@ -1590,23 +1580,12 @@ func pipelineCollect(domInput []byte, outputFile, toolName, pipeCmd, outBasename
 	toolOut := filepath.Join(outputFile, "urls", outBasename)
 	shellCmd := fmt.Sprintf("cat %s | %s | anew %s",
 		shQuote(tmp.Name()), pipeCmd, shQuote(toolOut))
+	// Run to completion — no timeout.
 	cmd := exec.Command("bash", "-c", shellCmd)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		logWarn(red("(-) " + toolName + " failed to start: " + err.Error()))
-		return ""
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			logDebug(toolName + " pipeline exit: " + err.Error())
-		}
-	case <-time.After(15 * time.Minute):
-		_ = cmd.Process.Kill()
-		logWarn(red("(-) " + toolName + " timed out; using partial output"))
+	if err := cmd.Run(); err != nil {
+		logDebug(toolName + " pipeline exit: " + err.Error())
 	}
 	if !fileExistsNonEmpty(toolOut) {
 		return ""

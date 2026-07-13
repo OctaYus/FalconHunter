@@ -260,9 +260,11 @@ class SubdomainsCollector:
                 _amass_fd, amass_tmp = tempfile.mkstemp(suffix=".txt")
                 os.close(_amass_fd)
                 try:
+                    # amass uses -df (domains file); -dL is a subfinder flag and
+                    # makes amass abort with "flag provided but not defined: -dL".
                     p = subprocess.run(
                         ["amass", "enum", "-passive", "-nocolor",
-                         "-dL", domains, "-o", amass_tmp],
+                         "-df", domains, "-o", amass_tmp],
                         capture_output=True, timeout=600,
                     )
                     if p.returncode != 0 and p.stderr:
@@ -903,31 +905,22 @@ class UrlFinder:
         param_files = []
         try:
             logger.info(f"{color.GREEN}(+) Collecting all URLs (katana){color.END}")
-            # -ct (crawl-duration) makes katana stop *gracefully* and flush its
-            # output; the outer subprocess timeout is only a hard backstop. Depth
-            # 5 + JS-crawl exploded combinatorially and never finished within
-            # 30 min, so cap depth/concurrency/rate and give each request its
-            # own timeout.
-            katana_cmd = [
-                "katana", "-list", subdomains_file,
-                "-d", "3",            # crawl depth (was 5 — never converged)
-                "-jc",                # crawl JS files for endpoints
-                "-fx",                # extract form action targets
-                "-c", "15",           # parallel workers
-                "-rl", "150",         # requests/sec cap
-                "-timeout", "10",     # per-request timeout (s)
-                "-ct", "1200",        # stop crawling after 20 min, keep results
-                "-silent",
-                "-o", katana_out,
-            ]
-            subprocess.run(katana_cmd, timeout=1500)
+            # Run katana to completion — no wall-clock timeout. Depth/concurrency/
+            # rate are still capped so the crawl converges, but katana is allowed
+            # to finish on its own instead of being killed partway through.
+            katana_cmd = (
+                f"katana -list {shlex.quote(subdomains_file)} "
+                f"-d 3 -jc -fx -c 15 -rl 150 -timeout 10 -silent "
+                f"-o {shlex.quote(katana_out)}"
+            )
+            # stdin=DEVNULL: katana auto-reads piped stdin, so an inherited pipe
+            # (non-interactive run) would make it block forever waiting for URLs.
+            subprocess.run(katana_cmd, shell=True, stdin=subprocess.DEVNULL)
         except FileNotFoundError:
             logger.warning(
                 f"{color.RED}(-) katana not found in PATH{color.END}")
         except subprocess.CalledProcessError as e:
             logger.warning(f"{color.RED}(-) katana exited with code {e.returncode}{color.END}")
-        except subprocess.TimeoutExpired:
-            logger.warning("katana hit its hard timeout; using partial output")
 
         try:
             if not os.path.isfile(subdomains_file) or os.path.getsize(subdomains_file) == 0:
@@ -1059,9 +1052,7 @@ class UrlFinder:
                         f"| anew {shlex.quote(tool_out)}"
                     )
                     try:
-                        subprocess.run(cmd, shell=True, timeout=900)
-                    except subprocess.TimeoutExpired:
-                        logger.warning(f"{tool_name} timed out; using partial output")
+                        subprocess.run(cmd, shell=True)
                     except subprocess.CalledProcessError as e:
                         logger.debug(f"{tool_name} pipeline exit: {e}")
                     finally:
@@ -1096,26 +1087,22 @@ class UrlFinder:
                             if d and d not in seen:
                                 seen.add(d)
                                 domains.append(d)
-                        deadline = time.time() + 1800  # 30-min global cap
+                        # Run waymore to completion per domain — no timeout.
                         with open(waymore_out, "ab") as agg:
                             for domain in domains:
-                                if time.time() > deadline:
-                                    logger.warning("waymore global timeout reached, stopping early")
-                                    break
                                 _fd, tmp_path = tempfile.mkstemp(suffix=".txt")
                                 os.close(_fd)
                                 try:
                                     subprocess.run(
-                                        ["waymore", "-i", domain, "-mode", "U", "-oU", tmp_path],
+                                        f"waymore -i {shlex.quote(domain)} -mode U -oU {shlex.quote(tmp_path)}",
+                                        shell=True,
                                         stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL, timeout=300)
+                                        stderr=subprocess.DEVNULL)
                                     # Stream the per-domain file into the aggregate
                                     # in fixed-size chunks — never load it all in RAM.
                                     if os.path.isfile(tmp_path):
                                         with open(tmp_path, "rb") as tf:
                                             shutil.copyfileobj(tf, agg, 1024 * 1024)
-                                except subprocess.TimeoutExpired:
-                                    logger.debug(f"waymore timed out for {domain}")
                                 finally:
                                     if os.path.isfile(tmp_path):
                                         os.unlink(tmp_path)
@@ -1135,9 +1122,10 @@ class UrlFinder:
                     try:
                         logger.info(f"{color.GREEN}(+) Running paramspider for parameter discovery{color.END}")
                         subprocess.run(
-                            ["paramspider", "-l", subdomains_file],
+                            f"paramspider -l {shlex.quote(subdomains_file)}",
+                            shell=True,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            timeout=600, cwd=tmp_dir)
+                            cwd=tmp_dir)
                         results_dir = os.path.join(tmp_dir, "results")
                         if os.path.isdir(results_dir):
                             with open(param_out, "ab") as agg:
@@ -1149,8 +1137,6 @@ class UrlFinder:
                         return param_out
                     except FileNotFoundError:
                         logger.warning(f"{color.RED}(-) paramspider not found in PATH{color.END}")
-                    except subprocess.TimeoutExpired:
-                        logger.warning("paramspider timed out, skipping")
                     except Exception as e:
                         logger.debug(f"paramspider failed: {e}")
                     finally:
@@ -3047,6 +3033,34 @@ def main():
         _single_tmp.close()
         args.domains = _single_tmp.name
 
+    # Materialize non-regular-file domain inputs into a real on-disk file.
+    # `-d <(echo foo)` (bash process substitution) hands us /dev/fd/NN, a pipe
+    # that only lives in THIS process; subfinder/amass run as children where
+    # Python has closed the inherited FD, so they hit "open /dev/fd/63: no such
+    # file" and the whole scan comes back empty. The same applies to /dev/stdin
+    # and named pipes. Reading it here (where the FD is still valid) and writing
+    # a plain temp file makes the path openable by every downstream tool.
+    _norm_tmp = None
+    if args.domains and not args.cleanup_only and not os.path.isfile(args.domains):
+        try:
+            with open(args.domains, "r", encoding="utf-8", errors="replace") as _src:
+                _lines = [ln.strip() for ln in _src if ln.strip()]
+            if _lines:
+                _norm_tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".txt", delete=False, encoding="utf-8")
+                _norm_tmp.write("\n".join(_lines) + "\n")
+                _norm_tmp.close()
+                args.domains = _norm_tmp.name
+                logger.info(
+                    f"{color.GREEN}(+) Normalized domain input "
+                    f"({len(_lines)} domain(s)) → {args.domains}{color.END}")
+            else:
+                logger.warning(
+                    f"{color.RED}(-) No domains read from input; is it empty?{color.END}")
+        except Exception as e:
+            logger.warning(
+                f"{color.RED}(-) Could not read domains input '{args.domains}': {e}{color.END}")
+
     # Load configuration
     config = load_config(args.config)
 
@@ -3065,8 +3079,9 @@ def main():
     )
 
     def _cleanup_tmp():
-        if _single_tmp and os.path.isfile(_single_tmp.name):
-            os.unlink(_single_tmp.name)
+        for _t in (_single_tmp, _norm_tmp):
+            if _t and os.path.isfile(_t.name):
+                os.unlink(_t.name)
 
     # Handle cleanup-only mode
     if args.cleanup_only:
